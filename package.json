@@ -5,7 +5,8 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build:web": "npm --prefix web run build",
+    "postinstall": "npm --prefix web install",
+    "build:web": "npm --prefix web install && npm --prefix web run build",
     "build": "npm run prisma:generate && npm run build:web && tsc",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",

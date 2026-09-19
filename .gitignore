@@ -2,7 +2,9 @@
 .env
 .env.*
 !.env.example
-
+# Keys and secrets
+*.pem
+*.key
 # Node dependencies and build
 node_modules/
 dist/

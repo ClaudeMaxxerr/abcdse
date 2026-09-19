@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { TeamScore } from "../types.js";
+import { TeamScore, MemberScore } from "../types.js";
 import { fetchTeamLeaderboard } from "../api.js";
 import { Trophy, RefreshCw, ChevronDown, ChevronUp, Sparkles, Users } from "lucide-react";
 
@@ -229,7 +229,7 @@ export const TeamLeaderboard: React.FC<{ initialData?: TeamScore[] }> = ({ initi
                         <span style={{ color: "#64748b" }}> / {t.totalPrs}</span>
                       </td>
                       <td style={{ padding: "1rem", textAlign: "right", fontFamily: "var(--font-mono)", color: "#94a3b8" }}>
-                        {t.members ? t.members.reduce((acc, m) => acc + m.raw, 0) : t.challengeTotal} pts
+                        {t.members ? t.members.reduce((acc: number, m: MemberScore) => acc + m.raw, 0) : t.challengeTotal} pts
                       </td>
                       <td style={{ padding: "1rem", textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 600, color: "#e2e8f0" }}>
                         {t.challengeTotal} pts
@@ -265,7 +265,7 @@ export const TeamLeaderboard: React.FC<{ initialData?: TeamScore[] }> = ({ initi
                           </div>
 
                           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "0.75rem" }}>
-                            {t.members.map((m) => {
+                            {t.members.map((m: MemberScore) => {
                               const isCapHit = m.raw >= m.tierCap;
                               return (
                                 <div
