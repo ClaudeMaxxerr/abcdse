@@ -39,6 +39,12 @@ async function main() {
   await prisma.waitlistEntry.deleteMany({
     where: { issue: { repo: { name: "patch-wars-rehearsal" } } },
   });
+  await prisma.issue.deleteMany({
+    where: { repo: { name: "patch-wars-rehearsal" } },
+  });
+  await prisma.repo.deleteMany({
+    where: { name: "patch-wars-rehearsal" },
+  });
 
   const result = await prisma.member.deleteMany({
     where: {
