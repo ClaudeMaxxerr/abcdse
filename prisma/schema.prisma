@@ -1,0 +1,225 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Department {
+  technical
+  pr
+  social
+  design
+  event_management
+  research_and_development
+}
+
+enum Team {
+  NEXUS
+  CIPHER
+  BYTE_BRIGADE
+  ASCEND
+  ECHO
+}
+
+enum Tier {
+  tech
+  general
+}
+
+enum IssueLevel {
+  easy
+  medium
+  hard
+}
+
+enum ClaimStatus {
+  active
+  pr_raised
+  merged
+  expired
+  released
+  rejected
+}
+
+model Member {
+  id              String          @id @default(uuid())
+  githubUserId    BigInt          @unique
+  githubLogin     String
+  displayName     String
+  department      Department
+  team            Team
+  tier            Tier
+  isAdmin         Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  claims          Claim[]
+  waitlistEntries WaitlistEntry[]
+  pullRequests    PullRequest[]
+  sessions        Session[]
+  botComments     BotComment[]
+  auditLogs       AuditLog[]
+
+  @@index([team])
+  @@index([department])
+  @@index([tier])
+  @@index([githubLogin])
+}
+
+model Repo {
+  id           String        @id @default(uuid())
+  owner        String
+  name         String
+  githubRepoId BigInt        @unique
+
+  issues       Issue[]
+  pullRequests PullRequest[]
+
+  @@unique([owner, name])
+}
+
+model Issue {
+  id              String          @id @default(uuid())
+  repoId          String
+  repo            Repo            @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  number          Int
+  title           String
+  level           IssueLevel
+  spots           Int
+  githubIssueId   BigInt          @unique
+
+  claims          Claim[]
+  waitlistEntries WaitlistEntry[]
+  pullRequests    PullRequest[]
+  botComments     BotComment[]
+
+  @@unique([repoId, number])
+  @@index([level])
+  @@index([repoId])
+}
+
+model Claim {
+  id         String      @id @default(uuid())
+  memberId   String
+  member     Member      @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  issueId    String
+  issue      Issue       @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  commentId  BigInt      @unique
+  claimedAt  DateTime    @default(now())
+  deadline   DateTime
+  status     ClaimStatus
+  promotedAt DateTime?
+
+  @@unique([memberId, issueId])
+  @@index([issueId, status])
+  @@index([memberId, status])
+  @@index([status, deadline])
+}
+
+model WaitlistEntry {
+  id         String    @id @default(uuid())
+  memberId   String
+  member     Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  issueId    String
+  issue      Issue     @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  commentId  BigInt    @unique
+  queuedAt   DateTime  @default(now())
+  position   Int
+  resolvedAt DateTime?
+
+  @@unique([memberId, issueId])
+  @@index([issueId, resolvedAt, position])
+  @@index([memberId, resolvedAt])
+}
+
+model PullRequest {
+  id             String    @id @default(uuid())
+  memberId       String
+  member         Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  issueId        String
+  issue          Issue     @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  number         Int
+  githubPrId     BigInt    @unique
+  repoId         String
+  repo           Repo      @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  openedAt       DateTime  @default(now())
+  closedAt       DateTime?
+  merged         Boolean   @default(false)
+  countsForScore Boolean   @default(true)
+
+  @@unique([repoId, number])
+  @@index([memberId, countsForScore, merged])
+  @@index([issueId])
+  @@index([repoId])
+}
+
+model WebhookDelivery {
+  id           String    @id @default(uuid())
+  deliveryUuid String    @unique
+  event        String
+  action       String?
+  receivedAt   DateTime  @default(now())
+  processedAt  DateTime?
+  status       String
+  error        String?
+
+  @@index([receivedAt])
+  @@index([status])
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  actorMemberId String?
+  actorMember   Member?  @relation(fields: [actorMemberId], references: [id], onDelete: SetNull)
+  actorIp       String
+  action        String
+  targetType    String
+  targetId      String
+  beforeJson    String?
+  afterJson     String?
+  createdAt     DateTime @default(now())
+
+  @@index([actorMemberId])
+  @@index([action])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+}
+
+model Session {
+  id        String    @id @default(uuid())
+  memberId  String
+  member    Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  ip        String?
+
+  @@index([memberId, expiresAt, revokedAt])
+  @@index([expiresAt])
+}
+
+model BotComment {
+  id        String   @id @default(uuid())
+  issueId   String
+  issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  memberId  String?
+  member    Member?  @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  commentId BigInt
+  kind      String
+  createdAt DateTime @default(now())
+
+  @@index([issueId, kind])
+  @@index([memberId])
+}
+
+model SystemConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

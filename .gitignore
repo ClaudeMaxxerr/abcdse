@@ -1,0 +1,15 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Node dependencies and build
+node_modules/
+dist/
+
+# Tests & coverage
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db

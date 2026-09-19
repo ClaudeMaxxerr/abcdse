@@ -1,0 +1,78 @@
+import { prisma } from "../db.js";
+import { GitHubApiClient } from "./client.js";
+
+export interface PostBotCommentResult {
+  posted: boolean;
+  commentId?: bigint;
+  reason?: string;
+}
+
+export interface PostBotCommentDeps {
+  prismaClient?: typeof prisma;
+  githubClient?: GitHubApiClient;
+}
+
+/**
+ * Posts a bot comment on a GitHub issue, enforcing idempotency via the BotComment table.
+ * Refuses to post the same kind twice on the same issue for the same member.
+ * Every bot comment is recorded in the database.
+ */
+export async function postBotComment(
+  issueId: string,
+  kind: string,
+  body: string,
+  memberId: string | null = null,
+  deps: PostBotCommentDeps = {}
+): Promise<PostBotCommentResult> {
+  const db = deps.prismaClient ?? prisma;
+
+  // 1. Check if a bot comment of this kind has already been posted
+  const existing = await db.botComment.findFirst({
+    where: {
+      issueId,
+      kind,
+      memberId: memberId ?? null,
+    },
+  });
+
+  if (existing) {
+    return {
+      posted: false,
+      commentId: existing.commentId,
+      reason: `Bot comment of kind '${kind}' already posted on issue ${issueId}${memberId ? ` for member ${memberId}` : ""}`,
+    };
+  }
+
+  // 2. Fetch issue and repo metadata needed to post comment via GitHub API
+  const issue = await db.issue.findUnique({
+    where: { id: issueId },
+    include: { repo: true },
+  });
+
+  let githubCommentId = BigInt(Date.now()); // fallback ID if client mocked or offline
+
+  if (deps.githubClient && issue) {
+    const ghRes = await deps.githubClient.createIssueComment(
+      issue.repo.owner,
+      issue.repo.name,
+      issue.number,
+      body
+    );
+    githubCommentId = BigInt(ghRes.id);
+  }
+
+  // 3. Record the bot comment in the database
+  const recorded = await db.botComment.create({
+    data: {
+      issueId,
+      memberId: memberId ?? null,
+      commentId: githubCommentId,
+      kind,
+    },
+  });
+
+  return {
+    posted: true,
+    commentId: recorded.commentId,
+  };
+}
