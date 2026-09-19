@@ -76,24 +76,6 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     crossOriginEmbedderPolicy: false,
   });
 
-  // 2. CORS with strict origin allowlist
-  await app.register(fastifyCors, {
-    origin: (origin, cb) => {
-      // Allow requests with no origin (like mobile apps, curl, same-origin)
-      if (!origin) {
-        cb(null, true);
-        return;
-      }
-      if (config.CORS_ORIGIN.includes(origin)) {
-        cb(null, true);
-        return;
-      }
-      cb(new Error("CORS origin not allowed"), false);
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  });
-
   // 3. Rate limiting (Global + tighter for write routes)
   await app.register(fastifyRateLimit, {
     global: true,
@@ -182,41 +164,73 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     onProcessDelivery: options.onProcessDelivery,
   });
 
-  // 6. Public Leaderboard and Scoring Routes (/api)
-  await app.register(leaderboardRoutes, {
-    prefix: "/api",
-    prismaClient: db,
-  });
+  // 6. API and Auth routes with scoped CORS
+  await app.register(async (apiScope) => {
+    // CORS scoped specifically to API and Auth routes
+    await apiScope.register(fastifyCors, {
+      origin: (origin, cb) => {
+        // Allow requests with no origin (like mobile apps, curl, same-origin)
+        if (!origin) {
+          cb(null, true);
+          return;
+        }
 
-  // 6b. Public Issues Board Route (/api/issues)
-  await app.register(issuesRoutes, {
-    prefix: "/api",
-    prismaClient: db,
-  });
+        // Derive allowed origins from config and service environment
+        const allowedOrigins = new Set([
+          ...config.CORS_ORIGIN,
+          ...(process.env.RENDER_EXTERNAL_URL ? [process.env.RENDER_EXTERNAL_URL.replace(/\/$/, "")] : []),
+          ...(process.env.PUBLIC_URL ? [process.env.PUBLIC_URL.replace(/\/$/, "")] : []),
+          "https://patch-wars-tracker.onrender.com",
+        ]);
 
-  // 6c. Member Dashboard Route (/api/dashboard)
-  await app.register(dashboardRoutes, {
-    prefix: "/api",
-    prismaClient: db,
-  });
+        if (allowedOrigins.has(origin)) {
+          cb(null, true);
+          return;
+        }
 
-  // 7b. Auth Routes (GitHub OAuth, session management)
-  await app.register(authRoutes, {
-    prefix: "/auth",
-    prismaClient: db,
-    fetchFn: options.fetchFn,
-  });
+        // Unrecognized origin: do NOT throw (never 500). Simply proceed without CORS headers.
+        cb(null, false);
+      },
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    });
 
-  // 7c. Registration Routes (/api/registration)
-  await app.register(registrationRoutes, {
-    prefix: "/api",
-    prismaClient: db,
-  });
+    // 6a. Public Leaderboard and Scoring Routes (/api)
+    await apiScope.register(leaderboardRoutes, {
+      prefix: "/api",
+      prismaClient: db,
+    });
 
-  // 7d. Admin Routes (/api/admin) — all guarded by allowlist check
-  await app.register(adminRoutes, {
-    prefix: "/api/admin",
-    prismaClient: db,
+    // 6b. Public Issues Board Route (/api/issues)
+    await apiScope.register(issuesRoutes, {
+      prefix: "/api",
+      prismaClient: db,
+    });
+
+    // 6c. Member Dashboard Route (/api/dashboard)
+    await apiScope.register(dashboardRoutes, {
+      prefix: "/api",
+      prismaClient: db,
+    });
+
+    // 7b. Auth Routes (GitHub OAuth, session management)
+    await apiScope.register(authRoutes, {
+      prefix: "/auth",
+      prismaClient: db,
+      fetchFn: options.fetchFn,
+    });
+
+    // 7c. Registration Routes (/api/registration)
+    await apiScope.register(registrationRoutes, {
+      prefix: "/api",
+      prismaClient: db,
+    });
+
+    // 7d. Admin Routes (/api/admin) — all guarded by allowlist check
+    await apiScope.register(adminRoutes, {
+      prefix: "/api/admin",
+      prismaClient: db,
+    });
   });
 
   // 7e. Opportunistic Sweep Hook on API / Webhook / Auth requests
