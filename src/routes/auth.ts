@@ -285,8 +285,13 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
       // Set signed httpOnly cookie per CONTEXT.md § 9.8
       reply.setCookie(SESSION_COOKIE_NAME, rawToken, COOKIE_OPTIONS);
 
-      // Redirect: new users go to registration, returning users go to dashboard
-      const frontendBase = config.CORS_ORIGIN[0] ?? "http://localhost:3000";
+      // Redirect: new users go to registration, returning users go to dashboard.
+      // Use RENDER_EXTERNAL_URL (auto-set by Render) so the redirect always lands
+      // on the live site, never on localhost — even if CORS_ORIGIN still lists localhost.
+      const frontendBase =
+        process.env["RENDER_EXTERNAL_URL"]?.replace(/\/$/, "") ??
+        config.CORS_ORIGIN[0] ??
+        "http://localhost:3000";
       const redirectPath = isNewUser ? "/register" : "/dashboard";
       return reply.redirect(`${frontendBase}${redirectPath}`, 302);
     }
