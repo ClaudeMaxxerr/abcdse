@@ -63,10 +63,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:", "https://avatars.githubusercontent.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:", "https://avatars.githubusercontent.com", "https://*.githubusercontent.com"],
         connectSrc: ["'self'"],
-        fontSrc: ["'self'"],
         objectSrc: ["'none'"],
         mediaSrc: ["'none'"],
         frameSrc: ["'none'"],
@@ -326,17 +326,19 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(fastifyStatic, {
     root: webDistPath,
     prefix: "/",
-    wildcard: false,
+    wildcard: true,
   });
 
   // Fallthrough handler for non-API SPA client-side routes
   app.setNotFoundHandler((request, reply) => {
-    const isApiRoute =
+    const isApiOrAssetRoute =
       request.url.startsWith("/api") ||
       request.url.startsWith("/auth") ||
-      request.url.startsWith("/webhooks");
+      request.url.startsWith("/webhooks") ||
+      request.url.startsWith("/internal") ||
+      request.url.startsWith("/assets");
 
-    if (isApiRoute) {
+    if (isApiOrAssetRoute) {
       return reply.status(404).send({
         statusCode: 404,
         error: "Not Found",
