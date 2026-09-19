@@ -79,12 +79,11 @@ export const RegisterPage: React.FC<{ onComplete: () => void }> = ({ onComplete 
                 fontSize: "0.9rem",
               }}
             >
-              <option value="technical">Technical (Technical Tier • 60 pt cap)</option>
-              <option value="pr">PR (General Tier • 80 pt cap)</option>
-              <option value="editorial">Editorial (General Tier • 80 pt cap)</option>
-              <option value="events">Events (General Tier • 80 pt cap)</option>
-              <option value="design">Design (General Tier • 80 pt cap)</option>
-              <option value="sponsorship">Sponsorship (General Tier • 80 pt cap)</option>
+              <option value="technical">Technical (60 pt cap)</option>
+              <option value="pr">PR (80 pt cap)</option>
+              <option value="research_and_development">Research &amp; Dev (80 pt cap)</option>
+              <option value="event_management">Event Management (80 pt cap)</option>
+              <option value="social_and_design">Social &amp; Design (80 pt cap)</option>
             </select>
 
             <div style={{ marginTop: "0.4rem", fontSize: "0.75rem", color: isTechDept ? "#a5b4fc" : "#d8b4fe" }}>

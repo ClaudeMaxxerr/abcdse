@@ -38,8 +38,7 @@ export function deriveTierFromDepartment(department: Department): Tier {
 export const DEPARTMENT_DISPLAY_NAMES: Record<Department, string> = {
   [Department.technical]: "Technical",
   [Department.pr]: "PR",
-  [Department.social]: "Social",
-  [Department.design]: "Design",
+  [Department.research_and_development]: "Research & Dev",
   [Department.event_management]: "Event Management",
-  [Department.research_and_development]: "Research & Development",
+  [Department.social_and_design]: "Social & Design",
 } as const;

@@ -1,4 +1,4 @@
-export type Department = "technical" | "pr" | "editorial" | "events" | "design" | "sponsorship";
+export type Department = "technical" | "pr" | "research_and_development" | "event_management" | "social_and_design";
 export type Team = "NEXUS" | "CIPHER" | "BYTE_BRIGADE" | "ASCEND" | "ECHO";
 export type Tier = "tech" | "general";
 export type Level = "easy" | "medium" | "hard";

@@ -125,10 +125,9 @@ export const MemberLeaderboard: React.FC<{ initialData?: MemberScore[] }> = ({ i
             <option value="ALL">All Departments</option>
             <option value="technical">Technical</option>
             <option value="pr">PR</option>
-            <option value="editorial">Editorial</option>
-            <option value="events">Events</option>
-            <option value="design">Design</option>
-            <option value="sponsorship">Sponsorship</option>
+            <option value="research_and_development">Research &amp; Dev</option>
+            <option value="event_management">Event Management</option>
+            <option value="social_and_design">Social &amp; Design</option>
           </select>
         </div>
 

@@ -11,10 +11,9 @@ generator client {
 enum Department {
   technical
   pr
-  social
-  design
-  event_management
   research_and_development
+  event_management
+  social_and_design
 }
 
 enum Team {
