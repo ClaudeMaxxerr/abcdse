@@ -4,7 +4,7 @@ import { fetchIssues } from "../api.js";
 import { Countdown } from "../components/Countdown.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { RuleNotice } from "../components/RuleNotice.js";
-import { Layers, ExternalLink, Search, Clock, Sparkles } from "lucide-react";
+import { Layers, ExternalLink, Search, Clock } from "lucide-react";
 
 export const IssueBoard: React.FC<{ user: UserAuth | null; initialData?: IssueItem[] }> = ({ user, initialData }) => {
   const [issues, setIssues] = useState<IssueItem[]>(initialData || []);
@@ -82,30 +82,11 @@ export const IssueBoard: React.FC<{ user: UserAuth | null; initialData?: IssueIt
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "1rem", marginBottom: "1.25rem" }}>
         <div>
           <h1 style={{ fontSize: "1.75rem", fontWeight: 800, letterSpacing: "-0.03em", color: "#f8fafc", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <Layers size={28} color="#38bdf8" /> Issue Board ({issues.length} Total)
+            <Layers size={28} color="#38bdf8" /> Issue Board
           </h1>
           <p style={{ color: "#94a3b8", fontSize: "0.875rem", marginTop: "0.25rem" }}>
             Explore verified open-source issues across all 6 repositories. Read-only board — comment on GitHub to claim!
           </p>
-        </div>
-
-        {/* Available pill */}
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          <div style={{
-            padding: "0.5rem 1rem",
-            background: "rgba(52, 211, 153, 0.15)",
-            border: "1px solid rgba(52, 211, 153, 0.4)",
-            borderRadius: "8px",
-            color: "#34d399",
-            fontWeight: 700,
-            fontSize: "0.85rem",
-            display: "flex",
-            alignItems: "center",
-            gap: "0.4rem",
-          }}>
-            <Sparkles size={16} />
-            <span>{availableCount} Issues Available Right Now</span>
-          </div>
         </div>
       </div>
 
@@ -180,11 +161,9 @@ export const IssueBoard: React.FC<{ user: UserAuth | null; initialData?: IssueIt
             }}
           >
             <option value="ALL">All Levels</option>
-            <option value="easy" disabled={isTechUser}>
-              Easy (1 spot, 10/15 pts){isTechUser ? " [Disabled for Tech]" : ""}
-            </option>
-            <option value="medium">Medium (2 spots, 20/30 pts)</option>
-            <option value="hard">Hard (3 spots, 35/50 pts)</option>
+            <option value="easy" disabled={isTechUser}>Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
           </select>
         </div>
 

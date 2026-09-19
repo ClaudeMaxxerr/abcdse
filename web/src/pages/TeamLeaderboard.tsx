@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { TeamScore, MemberScore } from "../types.js";
 import { fetchTeamLeaderboard } from "../api.js";
-import { Trophy, RefreshCw, ChevronDown, ChevronUp, Sparkles, Users } from "lucide-react";
+import { Trophy, RefreshCw, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
 
 export const TeamLeaderboard: React.FC<{ initialData?: TeamScore[] }> = ({ initialData }) => {
   const [teams, setTeams] = useState<TeamScore[]>(initialData || []);
@@ -170,7 +170,6 @@ export const TeamLeaderboard: React.FC<{ initialData?: TeamScore[] }> = ({ initi
               <tr style={{ background: "rgba(30, 41, 59, 0.7)", borderBottom: "1px solid #334155", color: "#94a3b8", textTransform: "uppercase", fontSize: "0.75rem", letterSpacing: "0.05em" }}>
                 <th style={{ padding: "0.85rem 1rem", width: "60px" }}>Rank</th>
                 <th style={{ padding: "0.85rem 1rem" }}>Team</th>
-                <th style={{ padding: "0.85rem 1rem", textAlign: "center" }}>Members</th>
                 <th style={{ padding: "0.85rem 1rem", textAlign: "center" }}>PRs (Merged / Total)</th>
                 <th style={{ padding: "0.85rem 1rem", textAlign: "right" }}>Raw Points</th>
                 <th style={{ padding: "0.85rem 1rem", textAlign: "right" }}>Capped Base</th>
@@ -182,13 +181,13 @@ export const TeamLeaderboard: React.FC<{ initialData?: TeamScore[] }> = ({ initi
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9} style={{ padding: "3rem 1rem", textAlign: "center", color: "#94a3b8" }}>
+                  <td colSpan={8} style={{ padding: "3rem 1rem", textAlign: "center", color: "#94a3b8" }}>
                     Loading team standings...
                   </td>
                 </tr>
               ) : teams.length === 0 ? (
                 <tr>
-                  <td colSpan={9} style={{ padding: "3rem 1rem", textAlign: "center", color: "#94a3b8" }}>
+                  <td colSpan={8} style={{ padding: "3rem 1rem", textAlign: "center", color: "#94a3b8" }}>
                     No team standings recorded yet.
                   </td>
                 </tr>
@@ -218,11 +217,6 @@ export const TeamLeaderboard: React.FC<{ initialData?: TeamScore[] }> = ({ initi
                         <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
                           ID: {t.team}
                         </div>
-                      </td>
-                      <td style={{ padding: "1rem", textAlign: "center", color: "#cbd5e1" }}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
-                          <Users size={14} color="#94a3b8" /> {t.members?.length || 9}
-                        </span>
                       </td>
                       <td style={{ padding: "1rem", textAlign: "center", fontFamily: "var(--font-mono)" }}>
                         <span style={{ color: "#34d399", fontWeight: 700 }}>{t.mergedPrs}</span>
@@ -254,7 +248,7 @@ export const TeamLeaderboard: React.FC<{ initialData?: TeamScore[] }> = ({ initi
                     {/* Expanded Member Breakdown */}
                     {isExpanded && t.members && t.members.length > 0 && (
                       <tr style={{ background: "rgba(15, 23, 42, 0.95)" }}>
-                        <td colSpan={9} style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid #334155" }}>
+                        <td colSpan={8} style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid #334155" }}>
                           <div style={{ marginBottom: "0.75rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                             <h4 style={{ fontSize: "0.85rem", fontWeight: 700, color: "#38bdf8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                               {t.teamName} — Member Breakdown ({t.members.length} participants)
