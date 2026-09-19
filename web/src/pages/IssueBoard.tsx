@@ -73,9 +73,6 @@ export const IssueBoard: React.FC<{ user: UserAuth | null; initialData?: IssueIt
     });
   }, [issues, selectedRepo, selectedLevel, selectedAvailability, searchQuery]);
 
-  // Quick stats
-  const availableCount = useMemo(() => issues.filter((i) => i.isAvailable).length, [issues]);
-
   return (
     <div className="animate-fade-in" style={{ maxWidth: "1400px", margin: "0 auto", padding: "1.5rem 1rem" }}>
       {/* Header */}
