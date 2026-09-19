@@ -78,4 +78,20 @@ describe("Configuration Validation", () => {
     expect(() => parseConfig({ ...validBaseEnv, CLAIM_TTL_HOURS: "-5" })).toThrow(/CLAIM_TTL_HOURS/);
     expect(() => parseConfig({ ...validBaseEnv, CLAIM_TTL_HOURS: "abc" })).toThrow(/CLAIM_TTL_HOURS/);
   });
+  it("parses valid TEST_DATABASE_URL with schema=patchwars_test", () => {
+    const env = {
+      ...validBaseEnv,
+      TEST_DATABASE_URL: "postgresql://user:pass@pooler.supabase.com:6543/postgres?schema=patchwars_test",
+    };
+    const config = parseConfig(env);
+    expect(config.TEST_DATABASE_URL).toContain("schema=patchwars_test");
+  });
+
+  it("rejects TEST_DATABASE_URL lacking schema=patchwars_test", () => {
+    const env = {
+      ...validBaseEnv,
+      TEST_DATABASE_URL: "postgresql://user:pass@pooler.supabase.com:6543/postgres?schema=wrong_schema",
+    };
+    expect(() => parseConfig(env)).toThrow(/TEST_DATABASE_URL must include/);
+  });
 });

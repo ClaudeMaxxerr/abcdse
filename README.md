@@ -53,6 +53,8 @@ All variables are validated at startup via Zod. The server exits immediately if 
 |---|---|---|
 | `DATABASE_URL` | ✅ | PostgreSQL connection string (must include `?pgbouncer=true` for Supabase pooler) |
 | `DIRECT_URL` | ✅ | Direct PostgreSQL connection (no PgBouncer, used by Prisma migrations) |
+| `TEST_DATABASE_URL` | ✅ (for `npm test`) | Test PostgreSQL connection string pointing to dedicated test schema (must include `?schema=patchwars_test`) |
+| `TEST_DIRECT_URL` | optional | Direct test connection for session-mode concurrency tests (must include `?schema=patchwars_test`) |
 | `SESSION_SECRET` | ✅ | ≥32 chars. Used to sign session cookies. Generate with: `openssl rand -hex 32` |
 | `ADMIN_GITHUB_USER_IDS` | ✅ | Comma-separated numeric GitHub User IDs of admins, e.g. `12345,67890` |
 | `CORS_ORIGIN` | ✅ | Comma-separated allowed origins, e.g. `https://tracker.example.com`. Wildcards are FORBIDDEN. |
@@ -75,6 +77,8 @@ All variables are validated at startup via Zod. The server exits immediately if 
 ```env
 DATABASE_URL=postgresql://user:pass@db.supabase.co:6543/postgres?pgbouncer=true
 DIRECT_URL=postgresql://user:pass@db.supabase.co:5432/postgres
+TEST_DATABASE_URL=postgresql://user:pass@db.supabase.co:6543/postgres?pgbouncer=true&schema=patchwars_test
+TEST_DIRECT_URL=postgresql://user:pass@db.supabase.co:5432/postgres?schema=patchwars_test
 SESSION_SECRET=your-super-secret-32-char-minimum-value-here
 ADMIN_GITHUB_USER_IDS=12345,67890
 CORS_ORIGIN=https://tracker.patchwarstracker.com
@@ -162,8 +166,13 @@ npx prisma migrate reset
 
 ## Running Tests
 
+The test suite requires `TEST_DATABASE_URL` pointing to an isolated PostgreSQL schema (`?schema=patchwars_test`).
+
+### Fail-Safe Test Guard
+A global test guard (`tests/setup.ts` and `src/db.ts`) verifies the connection string before any test runs. If `TEST_DATABASE_URL` is missing or lacks `?schema=patchwars_test`, the test suite aborts immediately with a fatal error. Tests are **physically prohibited** from falling back to `DATABASE_URL` or touching the production database schema.
+
 ```bash
-# Run all tests once
+# Run all tests once (uses TEST_DATABASE_URL from .env)
 npm test
 
 # Watch mode
@@ -173,9 +182,10 @@ npm run test:watch
 npx vitest run tests/rehearsal.test.ts
 npx vitest run tests/scoring.test.ts
 npx vitest run tests/b7_admin.test.ts
+npx vitest run tests/concurrency.test.ts
 ```
 
-Tests use in-memory mock databases — no real DB required.
+All tests that create temporary database fixtures automatically clean up after themselves in `afterEach` / `afterAll`.
 
 ---
 

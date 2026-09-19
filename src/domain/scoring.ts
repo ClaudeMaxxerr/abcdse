@@ -224,16 +224,30 @@ export function computeTeamBonuses(
     return a.teamName.localeCompare(b.teamName);
   });
 
-  const winnerTeam = rankedForChallenge[0] ?? null;
-  const runnerUpTeam = rankedForChallenge.length > 1 ? rankedForChallenge[1] : null;
+  const firstCandidate = rankedForChallenge[0] ?? null;
+  const winnerTeam =
+    firstCandidate && (firstCandidate.challengeTotal > 0 || firstCandidate.totalPrs > 0)
+      ? firstCandidate
+      : null;
 
-  // Most participation: non-winner teams sorted by totalPrs desc -> mergedPrs desc -> teamName asc
-  const nonWinners = rankedForChallenge.slice(1);
-  const rankedForParticipation = [...nonWinners].sort((a, b) => {
-    if (b.totalPrs !== a.totalPrs) return b.totalPrs - a.totalPrs;
-    if (b.mergedPrs !== a.mergedPrs) return b.mergedPrs - a.mergedPrs;
-    return a.teamName.localeCompare(b.teamName);
-  });
+  const secondCandidate = rankedForChallenge.length > 1 ? rankedForChallenge[1] : null;
+  const runnerUpTeam =
+    secondCandidate && (secondCandidate.challengeTotal > 0 || secondCandidate.totalPrs > 0)
+      ? secondCandidate
+      : null;
+
+  // Most participation: non-winner teams with at least 1 PR raised (totalPrs > 0)
+  const nonWinners = winnerTeam
+    ? rankedForChallenge.filter((t) => t.team !== winnerTeam.team)
+    : rankedForChallenge;
+
+  const rankedForParticipation = [...nonWinners]
+    .filter((t) => t.totalPrs > 0)
+    .sort((a, b) => {
+      if (b.totalPrs !== a.totalPrs) return b.totalPrs - a.totalPrs;
+      if (b.mergedPrs !== a.mergedPrs) return b.mergedPrs - a.mergedPrs;
+      return a.teamName.localeCompare(b.teamName);
+    });
 
   const mostParticipationTeam = rankedForParticipation[0] ?? null;
 

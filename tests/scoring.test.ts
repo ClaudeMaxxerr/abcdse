@@ -234,6 +234,116 @@ describe("Team Scoring and Bonus Calculation (§ 2.6)", () => {
     expect(results[2].bonuses.mostParticipation).toBe(true);
     expect(results[2].grandTotal).toBe(65); // 50 + 15
   });
+
+  it("empty competition (all teams zero score, zero PRs) produces all-zero standings with no bonuses", () => {
+    const rawTeams = [
+      {
+        team: Team.NEXUS,
+        teamName: "NEXUS",
+        memberScores: [],
+        challengeTotal: 0,
+        totalPrs: 0,
+        mergedPrs: 0,
+      },
+      {
+        team: Team.CIPHER,
+        teamName: "CIPHER",
+        memberScores: [],
+        challengeTotal: 0,
+        totalPrs: 0,
+        mergedPrs: 0,
+      },
+      {
+        team: Team.BYTE_BRIGADE,
+        teamName: "BYTE_BRIGADE",
+        memberScores: [],
+        challengeTotal: 0,
+        totalPrs: 0,
+        mergedPrs: 0,
+      },
+      {
+        team: Team.ASCEND,
+        teamName: "ASCEND",
+        memberScores: [],
+        challengeTotal: 0,
+        totalPrs: 0,
+        mergedPrs: 0,
+      },
+      {
+        team: Team.ECHO,
+        teamName: "ECHO",
+        memberScores: [],
+        challengeTotal: 0,
+        totalPrs: 0,
+        mergedPrs: 0,
+      },
+    ];
+
+    const results = computeTeamBonuses(rawTeams);
+    expect(results).toHaveLength(5);
+
+    for (const t of results) {
+      expect(t.challengeTotal).toBe(0);
+      expect(t.totalPrs).toBe(0);
+      expect(t.mergedPrs).toBe(0);
+      expect(t.bonuses.winner).toBe(false);
+      expect(t.bonuses.runnerUp).toBe(false);
+      expect(t.bonuses.mostParticipation).toBe(false);
+      expect(t.bonuses.bonusPoints).toBe(0);
+      expect(t.grandTotal).toBe(0);
+    }
+  });
+
+  it("single scoring team gets winner bonus only; zero-score teams receive 0 bonuses", () => {
+    const rawTeams = [
+      {
+        team: Team.NEXUS,
+        teamName: "NEXUS",
+        memberScores: [],
+        challengeTotal: 40,
+        totalPrs: 3,
+        mergedPrs: 2,
+      },
+      {
+        team: Team.CIPHER,
+        teamName: "CIPHER",
+        memberScores: [],
+        challengeTotal: 0,
+        totalPrs: 0,
+        mergedPrs: 0,
+      },
+      {
+        team: Team.BYTE_BRIGADE,
+        teamName: "BYTE_BRIGADE",
+        memberScores: [],
+        challengeTotal: 0,
+        totalPrs: 0,
+        mergedPrs: 0,
+      },
+    ];
+
+    const results = computeTeamBonuses(rawTeams);
+    const nexus = results.find((t) => t.team === Team.NEXUS)!;
+    expect(nexus.bonuses.winner).toBe(true);
+    expect(nexus.bonuses.runnerUp).toBe(false);
+    expect(nexus.bonuses.mostParticipation).toBe(false);
+    expect(nexus.bonuses.bonusPoints).toBe(20);
+    expect(nexus.grandTotal).toBe(60);
+
+    const cipher = results.find((t) => t.team === Team.CIPHER)!;
+    expect(cipher.bonuses.winner).toBe(false);
+    expect(cipher.bonuses.runnerUp).toBe(false);
+    expect(cipher.bonuses.mostParticipation).toBe(false);
+    expect(cipher.bonuses.bonusPoints).toBe(0);
+    expect(cipher.grandTotal).toBe(0);
+
+    const bb = results.find((t) => t.team === Team.BYTE_BRIGADE)!;
+    expect(bb.bonuses.winner).toBe(false);
+    expect(bb.bonuses.runnerUp).toBe(false);
+    expect(bb.bonuses.mostParticipation).toBe(false);
+    expect(bb.bonuses.bonusPoints).toBe(0);
+    expect(bb.grandTotal).toBe(0);
+  });
 });
 
 describe("API Endpoints — Leaderboard and Member Breakdown", () => {

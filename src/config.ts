@@ -34,6 +34,18 @@ const envSchema = z.object({
     .refine((url) => url.startsWith("postgresql://") || url.startsWith("postgres://"), {
       message: "DIRECT_URL must be a valid PostgreSQL connection string",
     }),
+  TEST_DATABASE_URL: z
+    .string()
+    .optional()
+    .refine((url) => !url || url.includes("schema=patchwars_test"), {
+      message: "TEST_DATABASE_URL must include '?schema=patchwars_test' (or '&schema=patchwars_test')",
+    }),
+  TEST_DIRECT_URL: z
+    .string()
+    .optional()
+    .refine((url) => !url || url.includes("schema=patchwars_test"), {
+      message: "TEST_DIRECT_URL must include '?schema=patchwars_test' (or '&schema=patchwars_test')",
+    }),
   ADMIN_GITHUB_USER_IDS: z
     .string()
     .min(1, "ADMIN_GITHUB_USER_IDS is required")

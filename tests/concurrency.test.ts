@@ -66,18 +66,30 @@ import crypto from "node:crypto";
  * We derive the session URL from DIRECT_URL which already points at port 5432.
  */
 function buildSessionUrl(): string | null {
-  const directUrl = process.env["DIRECT_URL"];
-  if (!directUrl) return null;
-  // DIRECT_URL already is the session/direct URL.
-  // Strip any pgbouncer flags and ensure connection_limit=1 so 10 clients don't exceed pool limit.
-  const base = directUrl.replace(/[?&]pgbouncer=true/, "").replace(/[?&]connection_limit=\d+/, "");
+  const testUrl = process.env["TEST_DIRECT_URL"] || process.env["TEST_DATABASE_URL"];
+  if (!testUrl) return null;
+  if (!testUrl.includes("schema=patchwars_test")) {
+    throw new Error(
+      "FATAL: Concurrency test must run against TEST_DATABASE_URL with schema=patchwars_test to protect production database."
+    );
+  }
+  // Ensure session mode port 5432 (direct), strip pgbouncer and connection_limit overrides
+  let base = testUrl.replace(":6543", ":5432").replace(/[?&]pgbouncer=true/, "").replace(/[?&]connection_limit=\d+/, "");
+  if (!base.includes("schema=patchwars_test")) {
+    const sep = base.includes("?") ? "&" : "?";
+    base = `${base}${sep}schema=patchwars_test`;
+  }
   const sep = base.includes("?") ? "&" : "?";
   return `${base}${sep}connection_limit=1`;
 }
 
 const SESSION_URL = buildSessionUrl();
+if (SESSION_URL && !SESSION_URL.includes("schema=patchwars_test")) {
+  throw new Error("FATAL: Resolved SESSION_URL must contain ?schema=patchwars_test");
+}
+
 const SKIP_REASON = !SESSION_URL
-  ? "DIRECT_URL not set — real concurrency test requires a live PostgreSQL connection"
+  ? "TEST_DATABASE_URL not set — real concurrency test requires an isolated test PostgreSQL connection"
   : null;
 
 // ---------------------------------------------------------------------------
@@ -235,7 +247,32 @@ describe(
       racerClients = Array.from({ length: 10 }, () => newClient());
     });
 
+    const activeFixtures: Array<{ issueId: string; memberIds: string[] }> = [];
+
+    afterEach(async () => {
+      if (seedDb && activeFixtures.length > 0) {
+        while (activeFixtures.length > 0) {
+          const f = activeFixtures.pop()!;
+          try {
+            await cleanRaceFixture(seedDb, f.issueId, f.memberIds);
+          } catch (e) {
+            console.error("Cleanup error in afterEach:", e);
+          }
+        }
+      }
+    });
+
     afterAll(async () => {
+      if (seedDb && activeFixtures.length > 0) {
+        while (activeFixtures.length > 0) {
+          const f = activeFixtures.pop()!;
+          try {
+            await cleanRaceFixture(seedDb, f.issueId, f.memberIds);
+          } catch (e) {
+            console.error("Cleanup error in afterAll:", e);
+          }
+        }
+      }
       if (!SESSION_URL) return;
       await Promise.all(racerClients.map((c) => c.$disconnect()));
       await seedDb.$disconnect();
@@ -312,7 +349,7 @@ describe(
 
     it("exactly one winner across 3 repeated races", async () => {
       /**
-       * Run 5 independent races. Each race:
+       * Run 3 independent races. Each race:
        *   - Seeds a fresh issue
        *   - Fires 10 concurrent claims
        *   - Asserts exactly 1 accepted + exactly 1 DB row
@@ -320,37 +357,42 @@ describe(
        */
       for (let run = 0; run < 3; run++) {
         const fixture = await seedRaceFixture(seedDb, run);
+        activeFixtures.push({ issueId: fixture.issueId, memberIds: fixture.members.map((m) => m.id) });
 
-        const { outcomes, winnerGithubUserId, claimCount, allPostedComments } = await runRace(fixture);
+        try {
+          const { outcomes, winnerGithubUserId, claimCount, allPostedComments } = await runRace(fixture);
 
-        const acceptedCount = outcomes.filter((o) => o === "accepted").length;
-        const nonAccepted = outcomes.filter((o) => o !== "accepted");
+          const acceptedCount = outcomes.filter((o) => o === "accepted").length;
+          const nonAccepted = outcomes.filter((o) => o !== "accepted");
 
-        // Core assertion: exactly one spot claimed
-        expect(acceptedCount).toBe(1);
-        expect(claimCount).toBe(1);
+          // Core assertion: exactly one spot claimed
+          expect(acceptedCount).toBe(1);
+          expect(claimCount).toBe(1);
 
-        // The other 9 are waitlisted or rejected (never a second "accepted")
-        expect(nonAccepted).toHaveLength(9);
-        for (const o of nonAccepted) {
-          expect(["waitlisted", "same_team", "previously_expired"]).toContain(o);
+          // The other 9 are waitlisted or rejected (never a second "accepted")
+          expect(nonAccepted).toHaveLength(9);
+          for (const o of nonAccepted) {
+            expect(["waitlisted", "same_team", "previously_expired"]).toContain(o);
+          }
+
+          // Winner must be one of the participating racers
+          expect(winnerGithubUserId).not.toBeNull();
+          const validUserIds = fixture.members.map((m) => m.githubUserId);
+          expect(validUserIds).toContain(winnerGithubUserId);
+
+          // No duplicate bot comments: each (issueId, kind, memberId) must be unique
+          const seen = new Set<string>();
+          for (const bc of allPostedComments) {
+            const key = `${bc.issueId}::${bc.kind}::${bc.memberId}`;
+            expect(seen.has(key)).toBe(false);
+            seen.add(key);
+          }
+        } finally {
+          // Cleanup for next run (including the randomly-created member rows)
+          await cleanRaceFixture(seedDb, fixture.issueId, fixture.members.map((m) => m.id));
+          const idx = activeFixtures.findIndex((f) => f.issueId === fixture.issueId);
+          if (idx !== -1) activeFixtures.splice(idx, 1);
         }
-
-        // Winner must be one of the participating racers
-        expect(winnerGithubUserId).not.toBeNull();
-        const validUserIds = fixture.members.map((m) => m.githubUserId);
-        expect(validUserIds).toContain(winnerGithubUserId);
-
-        // No duplicate bot comments: each (issueId, kind, memberId) must be unique
-        const seen = new Set<string>();
-        for (const bc of allPostedComments) {
-          const key = `${bc.issueId}::${bc.kind}::${bc.memberId}`;
-          expect(seen.has(key)).toBe(false);
-          seen.add(key);
-        }
-
-        // Cleanup for next run (including the randomly-created member rows)
-        await cleanRaceFixture(seedDb, fixture.issueId, fixture.members.map((m) => m.id));
       }
     }, 300_000); // 5-minute timeout for 3 × 10 concurrent DB transactions
   }

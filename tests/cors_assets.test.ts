@@ -14,17 +14,27 @@ import path from "node:path";
 describe("CORS and Static Assets Origin Handling", () => {
   let app: FastifyInstance;
 
+  const testAssetPath = path.resolve(process.cwd(), "web/dist/assets/test-asset.css");
+
   beforeEach(async () => {
     // Ensure test asset exists in web/dist/assets
-    const testAssetDir = path.resolve(process.cwd(), "web/dist/assets");
+    const testAssetDir = path.dirname(testAssetPath);
     fs.mkdirSync(testAssetDir, { recursive: true });
     fs.writeFileSync(
-      path.join(testAssetDir, "test-asset.css"),
+      testAssetPath,
       "body { background-color: #0d1117; }",
       "utf-8"
     );
 
+    const mockPrisma = {
+      issue: {
+        findMany: async () => [],
+      },
+      $queryRaw: async () => [{ 1: 1 }],
+    } as any;
+
     app = await buildApp({
+      prismaClient: mockPrisma,
       disableLogging: true,
       webhookSecret: "test-webhook-secret",
     });
@@ -34,6 +44,11 @@ describe("CORS and Static Assets Origin Handling", () => {
   afterEach(async () => {
     if (app) {
       await app.close();
+    }
+    if (fs.existsSync(testAssetPath)) {
+      try {
+        fs.unlinkSync(testAssetPath);
+      } catch {}
     }
   });
 
