@@ -26,6 +26,20 @@ const REHEARSAL_USER_IDS = [
 async function main() {
   console.log("Tearing down rehearsal members and data...");
 
+  // Delete all claims, PRs, waitlist, bot comments on rehearsal repo
+  await prisma.botComment.deleteMany({
+    where: { issue: { repo: { name: "patch-wars-rehearsal" } } },
+  });
+  await prisma.pullRequest.deleteMany({
+    where: { repo: { name: "patch-wars-rehearsal" } },
+  });
+  await prisma.claim.deleteMany({
+    where: { issue: { repo: { name: "patch-wars-rehearsal" } } },
+  });
+  await prisma.waitlistEntry.deleteMany({
+    where: { issue: { repo: { name: "patch-wars-rehearsal" } } },
+  });
+
   const result = await prisma.member.deleteMany({
     where: {
       OR: [

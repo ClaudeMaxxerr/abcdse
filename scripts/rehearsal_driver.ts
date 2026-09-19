@@ -202,24 +202,70 @@ async function main() {
 
   // Scenario 2: Member B claims Easy #1, #2, #3 -> all accepted
   console.log("\nScenario 2: Member B claims Easy #1, #2, #3...");
-  for (const num of [1, 2, 3]) {
-    const p = makeIssueCommentPayload({
-      issueNumber: num,
-      issueTitle: `Rehearsal Easy #${num}`,
+  {
+    // Claim #1
+    let p = makeIssueCommentPayload({
+      issueNumber: 1,
+      issueTitle: "Rehearsal Easy #1",
       level: "easy",
       githubUserId: 900000002,
       githubLogin: "member-b-nexus-pr",
       body: "Claiming this issue",
     });
-    const res = await sendWebhook("issue_comment", p);
-    console.log(`  Claim Easy #${num} response:`, res.status, res.json);
+    await sendWebhook("issue_comment", p);
     await sleep(2500);
-    const bot = fetchLatestBotComment(num);
+    let bot = fetchLatestBotComment(1);
     results.push({
       scenario: 2,
-      desc: `Member B claims Easy #${num} (accepted: within 3-easy limit)`,
+      desc: "Member B claims Easy #1 (accepted: spot 1)",
       botReply: bot?.body || "(bot comment pending)",
-      commentUrl: bot?.html_url || `https://github.com/${REPO_OWNER}/${REPO_NAME}/issues/${num}`,
+      commentUrl: bot?.html_url || `https://github.com/${REPO_OWNER}/${REPO_NAME}/issues/1`,
+    });
+
+    // Raise PR on #1 so active slot is freed and claim moves to pr_raised
+    await sendWebhook("pull_request", makePrPayload({ prNumber: 201, issueNumber: 1, githubUserId: 900000002, githubLogin: "member-b-nexus-pr", action: "opened" }));
+    await sleep(1500);
+
+    // Claim #2
+    p = makeIssueCommentPayload({
+      issueNumber: 2,
+      issueTitle: "Rehearsal Easy #2",
+      level: "easy",
+      githubUserId: 900000002,
+      githubLogin: "member-b-nexus-pr",
+      body: "Claiming this issue",
+    });
+    await sendWebhook("issue_comment", p);
+    await sleep(2500);
+    bot = fetchLatestBotComment(2);
+    results.push({
+      scenario: 2,
+      desc: "Member B claims Easy #2 (accepted: spot 1)",
+      botReply: bot?.body || "(bot comment pending)",
+      commentUrl: bot?.html_url || `https://github.com/${REPO_OWNER}/${REPO_NAME}/issues/2`,
+    });
+
+    // Raise PR on #2 so active slot is freed
+    await sendWebhook("pull_request", makePrPayload({ prNumber: 202, issueNumber: 2, githubUserId: 900000002, githubLogin: "member-b-nexus-pr", action: "opened" }));
+    await sleep(1500);
+
+    // Claim #3
+    p = makeIssueCommentPayload({
+      issueNumber: 3,
+      issueTitle: "Rehearsal Easy #3",
+      level: "easy",
+      githubUserId: 900000002,
+      githubLogin: "member-b-nexus-pr",
+      body: "Claiming this issue",
+    });
+    await sendWebhook("issue_comment", p);
+    await sleep(2500);
+    bot = fetchLatestBotComment(3);
+    results.push({
+      scenario: 2,
+      desc: "Member B claims Easy #3 (accepted: spot 1, 3rd easy)",
+      botReply: bot?.body || "(bot comment pending)",
+      commentUrl: bot?.html_url || `https://github.com/${REPO_OWNER}/${REPO_NAME}/issues/3`,
     });
   }
 
@@ -560,22 +606,22 @@ async function main() {
   console.log("\nScenario 13: Non-exact claim text 'Claiming this issue please!'...");
   {
     const p = makeIssueCommentPayload({
-      issueNumber: 3,
-      issueTitle: "Rehearsal Easy #3",
+      issueNumber: 5,
+      issueTitle: "Rehearsal Easy #5",
       level: "easy",
-      githubUserId: 900000005,
-      githubLogin: "member-e-echo-design",
+      githubUserId: 900000006,
+      githubLogin: "member-f-echo-rnd",
       body: "Claiming this issue please!",
     });
     const res = await sendWebhook("issue_comment", p);
     console.log("  Non-exact claim response:", res.status, res.json);
     await sleep(2500);
-    const bot = fetchLatestBotComment(3);
+    const bot = fetchLatestBotComment(5);
     results.push({
       scenario: 13,
       desc: "Comment 'Claiming this issue please!' (exact match required: bot informs syntax)",
       botReply: bot?.body || "(bot comment pending)",
-      commentUrl: bot?.html_url || `https://github.com/${REPO_OWNER}/${REPO_NAME}/issues/3`,
+      commentUrl: bot?.html_url || `https://github.com/${REPO_OWNER}/${REPO_NAME}/issues/5`,
     });
   }
 
