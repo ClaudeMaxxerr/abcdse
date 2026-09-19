@@ -1,5 +1,7 @@
 import { prisma } from "../db.js";
 import { GitHubApiClient } from "./client.js";
+import { GitHubAppTokenManager } from "./auth.js";
+import { config } from "../config.js";
 
 export interface PostBotCommentResult {
   posted: boolean;
@@ -10,6 +12,32 @@ export interface PostBotCommentResult {
 export interface PostBotCommentDeps {
   prismaClient?: typeof prisma;
   githubClient?: GitHubApiClient;
+}
+
+let sharedApiClient: GitHubApiClient | null = null;
+
+function getOrCreateGitHubClient(): GitHubApiClient | null {
+  if (sharedApiClient) return sharedApiClient;
+
+  if (config.GITHUB_APP_ID && config.GITHUB_APP_PRIVATE_KEY && !config.BOT_DRY_RUN) {
+    try {
+      const privateKey = config.GITHUB_APP_PRIVATE_KEY.includes("\\n")
+        ? config.GITHUB_APP_PRIVATE_KEY.replace(/\\n/g, "\n")
+        : config.GITHUB_APP_PRIVATE_KEY;
+
+      const tokenManager = new GitHubAppTokenManager({
+        appId: config.GITHUB_APP_ID,
+        privateKey,
+        installationId: config.GITHUB_APP_INSTALLATION_ID || "163014815",
+      });
+      sharedApiClient = new GitHubApiClient({ tokenManager });
+      return sharedApiClient;
+    } catch (err) {
+      console.error("[postBotComment] Failed to initialize GitHubApiClient:", err);
+      return null;
+    }
+  }
+  return null;
 }
 
 /**
@@ -51,14 +79,20 @@ export async function postBotComment(
 
   let githubCommentId = BigInt(Date.now()); // fallback ID if client mocked or offline
 
-  if (deps.githubClient && issue) {
-    const ghRes = await deps.githubClient.createIssueComment(
-      issue.repo.owner,
-      issue.repo.name,
-      issue.number,
-      body
-    );
-    githubCommentId = BigInt(ghRes.id);
+  const client = deps.githubClient ?? getOrCreateGitHubClient();
+
+  if (client && issue) {
+    try {
+      const ghRes = await client.createIssueComment(
+        issue.repo.owner,
+        issue.repo.name,
+        issue.number,
+        body
+      );
+      githubCommentId = BigInt(ghRes.id);
+    } catch (err) {
+      console.error(`[postBotComment] Error posting comment to issue #${issue.number} in ${issue.repo.owner}/${issue.repo.name}:`, err);
+    }
   }
 
   // 3. Record the bot comment in the database

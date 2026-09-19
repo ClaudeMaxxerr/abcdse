@@ -262,12 +262,13 @@ export async function processWebhookEvent(
       issueNumber: ghIssue.number,
     };
 
+    const nowIso = new Date().toISOString();
     const commentCtx = {
       commentId: BigInt(comment.id),
       githubUserId: BigInt(comment.user.id),
       body: comment.body,
-      createdAt: comment.created_at,
-      updatedAt: comment.updated_at,
+      createdAt: comment.created_at || nowIso,
+      updatedAt: comment.updated_at || comment.created_at || nowIso,
     };
 
     const postReply = async (issueId: string, kind: string, body: string, memberId: string | null) => {
@@ -295,9 +296,9 @@ export async function processWebhookEvent(
     const prCtx = {
       id: pr.id,
       number: pr.number,
-      title: pr.title,
+      title: pr.title || "",
       body: pr.body ?? null,
-      createdAt: pr.created_at,
+      createdAt: pr.created_at || new Date().toISOString(),
       closedAt: pr.closed_at ?? null,
       merged: pr.merged ?? false,
       user: {

@@ -15,19 +15,24 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 const REHEARSAL_USER_IDS = [
-  BigInt(9000001),
-  BigInt(9000002),
-  BigInt(9000003),
-  BigInt(9000004),
-  BigInt(9000005),
-  BigInt(9000006),
+  BigInt(900000001),
+  BigInt(900000002),
+  BigInt(900000003),
+  BigInt(900000004),
+  BigInt(900000005),
+  BigInt(900000006),
 ];
 
 async function main() {
-  console.log("Tearing down 6 rehearsal members...");
+  console.log("Tearing down rehearsal members and data...");
 
   const result = await prisma.member.deleteMany({
-    where: { githubUserId: { in: REHEARSAL_USER_IDS } },
+    where: {
+      OR: [
+        { githubUserId: { in: REHEARSAL_USER_IDS } },
+        { githubUserId: { gte: BigInt(900000000) } },
+      ],
+    },
   });
 
   console.log(`Deleted ${result.count} rehearsal member(s) (+ cascaded data).`);

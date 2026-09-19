@@ -77,6 +77,7 @@ const envSchema = z.object({
   // Future phases optional credentials
   GITHUB_APP_ID: z.string().optional(),
   GITHUB_APP_PRIVATE_KEY: z.string().optional(),
+  GITHUB_APP_INSTALLATION_ID: z.string().optional().default("163014815"),
   GITHUB_WEBHOOK_SECRET: z.string().optional(),
   GITHUB_CLIENT_ID: z.string().optional(),
   GITHUB_CLIENT_SECRET: z.string().optional(),
