@@ -17,6 +17,7 @@ import { deriveTier, detectForbiddenFields } from "./registration.js";
 import {
   ACTIVE_CLAIM_STATUSES,
   LIFETIME_EASY_CLAIM_STATUSES,
+  LIFETIME_HARD_CLAIM_STATUSES,
   COMMITTED_CLAIM_STATUSES,
 } from "../domain/claimConstants.js";
 
@@ -142,7 +143,7 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
     const hardClaimsCount = await db.claim.count({
       where: {
         memberId,
-        status: { in: [...COMMITTED_CLAIM_STATUSES] },
+        status: { in: [...LIFETIME_HARD_CLAIM_STATUSES] },
         issue: {
           level: "hard",
         },

@@ -35,6 +35,13 @@ export const LIFETIME_EASY_CLAIM_STATUSES: readonly ClaimStatus[] = [
   ClaimStatus.merged,
 ] as const;
 
+/** Claims counting towards the lifetime limit of 2 Hard claims (General tier) */
+export const LIFETIME_HARD_CLAIM_STATUSES: readonly ClaimStatus[] = [
+  ClaimStatus.active,
+  ClaimStatus.pr_raised,
+  ClaimStatus.merged,
+] as const;
+
 /** Claims representing committed work that lock department/team editing */
 export const COMMITTED_CLAIM_STATUSES: readonly ClaimStatus[] = [
   ClaimStatus.active,

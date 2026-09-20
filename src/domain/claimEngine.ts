@@ -22,6 +22,7 @@ import { config } from "../config.js";
 import {
   ACTIVE_CLAIM_STATUSES,
   LIFETIME_EASY_CLAIM_STATUSES,
+  LIFETIME_HARD_CLAIM_STATUSES,
   COMMITTED_CLAIM_STATUSES,
   OCCUPIED_SPOT_CLAIM_STATUSES,
 } from "./claimConstants.js";
@@ -34,6 +35,7 @@ import {
 export {
   ACTIVE_CLAIM_STATUSES,
   LIFETIME_EASY_CLAIM_STATUSES,
+  LIFETIME_HARD_CLAIM_STATUSES,
   COMMITTED_CLAIM_STATUSES,
   OCCUPIED_SPOT_CLAIM_STATUSES,
 };
@@ -261,7 +263,7 @@ export async function processClaimComment(
         const hardCount = await tx.claim.count({
           where: {
             memberId: member.id,
-            status: { in: [...COMMITTED_CLAIM_STATUSES] },
+            status: { in: [...LIFETIME_HARD_CLAIM_STATUSES] },
             issue: { level: IssueLevel.hard },
           },
         });
