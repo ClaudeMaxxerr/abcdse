@@ -220,7 +220,10 @@ export async function processPullRequestOpened(
     if (existingPr) {
       await db.pullRequest.update({
         where: { id: existingPr.id },
-        data: { countsForScore: false },
+        data: {
+          githubPrId: BigInt(prCtx.id),
+          countsForScore: false,
+        },
       });
     } else {
       await db.pullRequest.create({
@@ -254,10 +257,12 @@ export async function processPullRequestOpened(
 
     await db.$transaction(async (tx: any) => {
       // Update claim status to pr_raised (frees an active slot)
-      await tx.claim.update({
-        where: { id: claim.id },
-        data: { status: ClaimStatus.pr_raised },
-      });
+      if (claim.status !== ClaimStatus.merged) {
+        await tx.claim.update({
+          where: { id: claim.id },
+          data: { status: ClaimStatus.pr_raised },
+        });
+      }
 
       // Record / Update PullRequest
       if (existingPr) {
@@ -266,7 +271,8 @@ export async function processPullRequestOpened(
           data: {
             issueId: matchedIssue.id,
             countsForScore: true,
-            merged: prCtx.merged ?? false,
+            githubPrId: BigInt(prCtx.id),
+            merged: prCtx.merged ?? existingPr.merged ?? false,
           },
         });
       } else {
@@ -305,7 +311,10 @@ export async function processPullRequestOpened(
     if (existingPr) {
       await db.pullRequest.update({
         where: { id: existingPr.id },
-        data: { countsForScore: false },
+        data: {
+          githubPrId: BigInt(prCtx.id),
+          countsForScore: false,
+        },
       });
     } else {
       await db.pullRequest.create({
@@ -373,7 +382,7 @@ export async function processPullRequestClosed(
     throw new Error(`Repository ${repoCtx.owner}/${repoCtx.name} not found in database.`);
   }
 
-  // 2. Find PullRequest record
+  // 2. Find PullRequest record by (repoId, number)
   let pr = await db.pullRequest.findFirst({
     where: {
       repoId: repo.id,
@@ -418,30 +427,60 @@ export async function processPullRequestClosed(
   }
 
   if (isMerged) {
+    let actuallyEarnsMerged = countsForScore;
+
     await db.$transaction(async (tx: any) => {
-      // Set merged = true on this PR
+      // Check if another PR on the SAME issue is already merged
+      const otherMergedPrs = await tx.pullRequest.findMany({
+        where: {
+          issueId: pr.issueId,
+          id: { not: pr.id },
+          merged: true,
+          countsForScore: true,
+        },
+      });
+
+      if (otherMergedPrs.length > 0) {
+        // Sort by closedAt ascending to find the earliest merged PR
+        const sorted = [...otherMergedPrs].sort((a, b) => {
+          const tA = a.closedAt ? new Date(a.closedAt).getTime() : 0;
+          const tB = b.closedAt ? new Date(b.closedAt).getTime() : 0;
+          return tA - tB;
+        });
+        const earliestOther = sorted[0]!;
+        const earliestOtherTime = earliestOther.closedAt ? new Date(earliestOther.closedAt).getTime() : 0;
+        const thisTime = closedAt.getTime();
+
+        if (earliestOtherTime <= thisTime) {
+          // Another PR was merged first, so this PR receives raised value (5)
+          actuallyEarnsMerged = false;
+        } else {
+          // This PR was actually merged earlier! Demote the other PR to merged: false
+          await tx.pullRequest.updateMany({
+            where: {
+              issueId: pr.issueId,
+              id: { not: pr.id },
+            },
+            data: {
+              merged: false,
+            },
+          });
+        }
+      }
+
+      // Update this PR
       await tx.pullRequest.update({
         where: { id: pr.id },
         data: {
-          merged: true,
+          githubPrId: BigInt(prCtx.id),
+          merged: actuallyEarnsMerged,
           closedAt,
           countsForScore,
         },
       });
 
-      // Update matching claim to merged if countsForScore
-      if (countsForScore) {
-        await tx.claim.updateMany({
-          where: {
-            issueId: pr.issueId,
-            memberId: pr.memberId,
-          },
-          data: {
-            status: ClaimStatus.merged,
-          },
-        });
-
-        // Set all OTHER PRs on the same issue to merged = false (keeps their raised value of 5)
+      if (actuallyEarnsMerged) {
+        // Demote all OTHER PRs on the same issue to merged = false (keeps their raised value of 5)
         await tx.pullRequest.updateMany({
           where: {
             issueId: pr.issueId,
@@ -451,12 +490,37 @@ export async function processPullRequestClosed(
             merged: false,
           },
         });
+
+        // Update matching claim to merged
+        await tx.claim.updateMany({
+          where: {
+            issueId: pr.issueId,
+            memberId: pr.memberId,
+          },
+          data: {
+            status: ClaimStatus.merged,
+          },
+        });
+      } else if (countsForScore) {
+        // PR counts for score at raised value (5); ensure claim status is at least pr_raised
+        await tx.claim.updateMany({
+          where: {
+            issueId: pr.issueId,
+            memberId: pr.memberId,
+            status: ClaimStatus.active,
+          },
+          data: {
+            status: ClaimStatus.pr_raised,
+          },
+        });
       }
     });
 
-    const msg = countsForScore
+    const msg = actuallyEarnsMerged
       ? `PR #${pr.number} merged! Awarded merged points for issue #${pr.issue.number}.`
-      : `PR #${pr.number} merged after final deadline. Scores 0 points per § 2.7.`;
+      : (countsForScore
+          ? `PR #${pr.number} merged. Awarded raised points (5) as another PR was merged first for issue #${pr.issue.number}.`
+          : `PR #${pr.number} merged after final deadline. Scores 0 points per § 2.7.`);
 
     await postReply(pr.issueId, "pr_merged", msg, pr.memberId);
 
@@ -471,6 +535,7 @@ export async function processPullRequestClosed(
     await db.pullRequest.update({
       where: { id: pr.id },
       data: {
+        githubPrId: BigInt(prCtx.id),
         merged: false,
         closedAt,
         countsForScore,

@@ -390,6 +390,7 @@ describe("processPullRequestClosed", () => {
       },
       pullRequest: {
         findFirst: async () => pr1,
+        findMany: async () => [],
         update: async ({ data }: any) => {
           pr1 = { ...pr1, ...data };
           return pr1;
@@ -453,6 +454,7 @@ describe("processPullRequestClosed", () => {
       },
       pullRequest: {
         findFirst: async () => pr1,
+        findMany: async () => [],
         update: async ({ data }: any) => {
           pr1 = { ...pr1, ...data };
           return pr1;
@@ -531,5 +533,150 @@ describe("processPullRequestClosed", () => {
     expect(res.outcome).toBe("closed_unmerged");
     expect(res.countsForScore).toBe(true);
     expect(pr1.merged).toBe(false);
+  });
+
+  it("updates two PRs with the same number in different repos independently on merge", async () => {
+    let prAqua = {
+      id: "pr-aqua-30",
+      number: 30,
+      repoId: "repo-aqua",
+      memberId: "mem-1",
+      issueId: "issue-aqua-21",
+      countsForScore: true,
+      merged: false,
+      issue: { number: 21 },
+    };
+
+    let prCampus = {
+      id: "pr-campus-30",
+      number: 30,
+      repoId: "repo-campus",
+      memberId: "mem-1",
+      issueId: "issue-campus-24",
+      countsForScore: true,
+      merged: false,
+      issue: { number: 24 },
+    };
+
+    const mockDb = {
+      repo: {
+        findFirst: async ({ where }: any) => {
+          if (where.name === "aqua-sense") return { id: "repo-aqua", owner: "AARVAK-VSET", name: "aqua-sense" };
+          if (where.name === "campus-flow") return { id: "repo-campus", owner: "AARVAK-VSET", name: "campus-flow" };
+          return null;
+        },
+      },
+      pullRequest: {
+        findFirst: async ({ where }: any) => {
+          if (where.repoId === "repo-aqua" && where.number === 30) return prAqua;
+          if (where.repoId === "repo-campus" && where.number === 30) return prCampus;
+          return null;
+        },
+        findMany: async () => [],
+        update: async ({ where, data }: any) => {
+          if (where.id === "pr-aqua-30") prAqua = { ...prAqua, ...data };
+          if (where.id === "pr-campus-30") prCampus = { ...prCampus, ...data };
+        },
+        updateMany: async () => {},
+      },
+      claim: {
+        updateMany: async () => {},
+      },
+      $transaction: async (fn: any) => fn(mockDb),
+    };
+
+    // Merge aqua-sense PR 30
+    await processPullRequestClosed(
+      mockDb,
+      {
+        id: 4584585902,
+        number: 30,
+        title: "Fixes #21",
+        createdAt: "2026-09-20T15:03:35Z",
+        closedAt: "2026-09-20T15:59:52Z",
+        merged: true,
+        user: { id: 100, login: "alice" },
+      },
+      { owner: "AARVAK-VSET", name: "aqua-sense" },
+      { postReply: async () => {} }
+    );
+
+    expect(prAqua.merged).toBe(true);
+    expect(prCampus.merged).toBe(false); // campus-flow PR 30 unaffected
+  });
+
+  it("merging one PR on a 2-spot issue drops the other PR to raised value (5)", async () => {
+    let pr30 = {
+      id: "pr-30",
+      number: 30,
+      repoId: "repo-aqua",
+      memberId: "mem-1",
+      issueId: "issue-21",
+      countsForScore: true,
+      merged: true,
+      closedAt: new Date("2026-09-20T15:59:52Z"),
+      issue: { number: 21 },
+    };
+
+    let pr24 = {
+      id: "pr-24",
+      number: 24,
+      repoId: "repo-aqua",
+      memberId: "mem-2",
+      issueId: "issue-21",
+      countsForScore: true,
+      merged: false,
+      closedAt: null as Date | null,
+      issue: { number: 21 },
+    };
+
+    const mockDb = {
+      repo: {
+        findFirst: async () => ({ id: "repo-aqua", owner: "AARVAK-VSET", name: "aqua-sense" }),
+      },
+      pullRequest: {
+        findFirst: async ({ where }: any) => {
+          if (where.number === 24) return pr24;
+          if (where.number === 30) return pr30;
+          return null;
+        },
+        findMany: async ({ where }: any) => {
+          if (where.issueId === "issue-21" && where.id?.not === "pr-24") {
+            return [pr30];
+          }
+          return [];
+        },
+        update: async ({ where, data }: any) => {
+          if (where.id === "pr-24") pr24 = { ...pr24, ...data };
+          if (where.id === "pr-30") pr30 = { ...pr30, ...data };
+        },
+        updateMany: async () => {},
+      },
+      claim: {
+        updateMany: async () => {},
+      },
+      $transaction: async (fn: any) => fn(mockDb),
+    };
+
+    // PR 24 merges later at 16:21:02
+    const res = await processPullRequestClosed(
+      mockDb,
+      {
+        id: 4582528723,
+        number: 24,
+        title: "Fixes #21",
+        createdAt: "2026-09-20T05:31:07Z",
+        closedAt: "2026-09-20T16:21:02Z",
+        merged: true,
+        user: { id: 200, login: "bob" },
+      },
+      { owner: "AARVAK-VSET", name: "aqua-sense" },
+      { postReply: async () => {} }
+    );
+
+    // PR 24 gets merged: false because PR 30 was merged earlier
+    expect(pr24.merged).toBe(false);
+    expect(pr24.countsForScore).toBe(true);
+    expect(pr30.merged).toBe(true);
   });
 });

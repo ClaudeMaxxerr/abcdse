@@ -160,21 +160,81 @@ export class GitHubApiClient {
       user: { id: number; login: string };
     }>
   > {
+    return this.listPullRequests(owner, repo, "open");
+  }
+
+  /**
+   * Helper to list pull requests with any state (open, closed, or all) for a repository.
+   */
+  public async listPullRequests(
+    owner: string,
+    repo: string,
+    state: "open" | "closed" | "all" = "all"
+  ): Promise<
+    Array<{
+      id: number;
+      number: number;
+      title: string;
+      body: string | null;
+      state: string;
+      created_at: string;
+      closed_at?: string | null;
+      merged_at?: string | null;
+      user: { id: number; login: string };
+    }>
+  > {
     const result = await this.request<
       Array<{
         id: number;
         number: number;
         title: string;
         body: string | null;
+        state: string;
         created_at: string;
         closed_at?: string | null;
         merged_at?: string | null;
         user: { id: number; login: string };
       }>
-    >(`/repos/${owner}/${repo}/pulls?state=open&per_page=100`, {
+    >(`/repos/${owner}/${repo}/pulls?state=${state}&per_page=100`, {
       method: "GET",
     });
     return result.data || [];
+  }
+
+  /**
+   * Helper to get a specific pull request.
+   */
+  public async getPullRequest(
+    owner: string,
+    repo: string,
+    number: number
+  ): Promise<{
+    id: number;
+    number: number;
+    title: string;
+    body: string | null;
+    state: string;
+    merged: boolean;
+    created_at: string;
+    closed_at?: string | null;
+    merged_at?: string | null;
+    user: { id: number; login: string };
+  }> {
+    const result = await this.request<{
+      id: number;
+      number: number;
+      title: string;
+      body: string | null;
+      state: string;
+      merged: boolean;
+      created_at: string;
+      closed_at?: string | null;
+      merged_at?: string | null;
+      user: { id: number; login: string };
+    }>(`/repos/${owner}/${repo}/pulls/${number}`, {
+      method: "GET",
+    });
+    return result.data;
   }
 }
 
