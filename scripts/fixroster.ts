@@ -22,10 +22,11 @@ const ROSTER: Record<string, { name: string; dept: string; team: string }> = {
     "PashinP": { name: "Pashin Pruhi", dept: "technical", team: "ASCEND" },
     "ParthMudgal07": { name: "Parth", dept: "research_and_development", team: "ASCEND" },
     "rishikaajainn": { name: "Rishika Jain", dept: "pr", team: "ASCEND" },
+    "parvgoyal29": { name: "Parv Goyal", dept: "social_and_design", team: "ASCEND" },
 
     // ---- NEXUS ----
     "KA-1205": { name: "Kartik Arora", dept: "technical", team: "NEXUS" },
-    "Mayank-kumar001": { name: "Mayank Kumar", dept: "technical", team: "NEXUS" },
+    //"Mayank-kumar001": { name: "Mayank Kumar", dept: "technical", team: "NEXUS" },
     "Mayank-Kumar0018": { name: "Mayank Kumar", dept: "technical", team: "NEXUS" },
 
     // ---- BYTE BRIGADE ----
@@ -34,6 +35,7 @@ const ROSTER: Record<string, { name: string; dept: string; team: string }> = {
     "devansh-dua": { name: "Devansh Dua", dept: "pr", team: "BYTE_BRIGADE" },
     "Lynx330": { name: "Aditya Balodi", dept: "event_management", team: "BYTE_BRIGADE" },
     "adittt18": { name: "Aditya Sasmal", dept: "social_and_design", team: "BYTE_BRIGADE" },
+    "Simran129546": { name: "Simran", dept: "social_and_design", team: "BYTE_BRIGADE" },
 };
 
 // Duplicate / test accounts to remove. Comment out any you want to keep.
