@@ -164,16 +164,19 @@ export const registrationRoutes: FastifyPluginAsync<RegistrationRoutesOptions> =
     // 5. Derive tier server-side — NEVER accept from client
     const tier = deriveTier(department);
 
-    // 6. Check if member already has active/past claims or PRs.
+    // 6. Check if member already has committed claims (active, pr_raised, merged) or PRs.
     // If they have begun participating, they cannot modify department/team (admin-only).
-    const claimsCount = await db.claim.count({
-      where: { memberId: session.memberId },
+    const committedClaimsCount = await db.claim.count({
+      where: {
+        memberId: session.memberId,
+        status: { in: ["active", "pr_raised", "merged"] },
+      },
     });
     const prsCount = await db.pullRequest.count({
       where: { memberId: session.memberId },
     });
 
-    if (claimsCount > 0 || prsCount > 0) {
+    if (committedClaimsCount > 0 || prsCount > 0) {
       if (session.member.department !== department || session.member.team !== team) {
         return reply.status(403).send({
           statusCode: 403,

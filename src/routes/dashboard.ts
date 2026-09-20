@@ -94,9 +94,14 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
       take: 20,
     });
 
-    // 4. Claims and PR counts for self-correction eligibility (0 claims & 0 PRs)
-    const claimsCount = await db.claim.count({
-      where: { memberId },
+    // 4. Claims and PR counts for self-correction eligibility:
+    // Only claims representing committed work (active, pr_raised, merged) block editing.
+    // Released, expired, and rejected claims do NOT block editing.
+    const committedClaimsCount = await db.claim.count({
+      where: {
+        memberId,
+        status: { in: ["active", "pr_raised", "merged"] },
+      },
     });
     const prsCount = await db.pullRequest.count({
       where: { memberId },
@@ -137,7 +142,7 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
     const easyRemaining = isTech ? 0 : Math.max(0, 3 - easyClaimsCount);
     const freeActiveSlots = Math.max(0, 2 - activeClaims.length);
     const capReached = score.raw >= score.tierCap;
-    const canEditProfile = Boolean(claimsCount === 0 && prsCount === 0);
+    const canEditProfile = Boolean(committedClaimsCount === 0 && prsCount === 0);
 
     return reply.status(200).send({
       statusCode: 200,
@@ -230,11 +235,16 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
 
     const memberId = session.memberId;
 
-    // Check claims & PR counts
-    const claimsCount = await db.claim.count({ where: { memberId } });
+    // Check committed claims & PR counts (only active, pr_raised, merged block editing)
+    const committedClaimsCount = await db.claim.count({
+      where: {
+        memberId,
+        status: { in: ["active", "pr_raised", "merged"] },
+      },
+    });
     const prsCount = await db.pullRequest.count({ where: { memberId } });
 
-    if (claimsCount > 0 || prsCount > 0) {
+    if (committedClaimsCount > 0 || prsCount > 0) {
       return reply.status(403).send({
         statusCode: 403,
         error: "Forbidden",

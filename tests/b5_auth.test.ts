@@ -141,6 +141,11 @@ function makeMockDb() {
       findMany: vi.fn(async () => []),
     },
 
+    waitlistEntry: {
+      count: vi.fn(async () => 0),
+      findMany: vi.fn(async () => []),
+    },
+
     $queryRaw: vi.fn(async () => [{ "?column?": 1 }]),
     $disconnect: vi.fn(async () => {}),
   } as any;
@@ -1045,9 +1050,44 @@ describe("PATCH /api/dashboard/profile — self-correction rules", () => {
     );
   });
 
-  it("blocks profile change with 403 when member has at least one claim", async () => {
-    // Mock 1 claim
-    db.claim.count.mockImplementation(async () => 1);
+  it("canEditProfile is true with only released/expired/rejected claims (allows editing)", async () => {
+    // When count queries for { in: ['active', 'pr_raised', 'merged'] }, return 0
+    db.claim.count.mockImplementation(async ({ where }: { where?: any }) => {
+      if (where?.status?.in) {
+        // Checking for committed work: none exists
+        return 0;
+      }
+      // Total claims query: 1 released claim exists
+      return 1;
+    });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/dashboard/profile",
+      headers: {
+        cookie: sessionCookie,
+        "x-csrf-token": csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        department: "social_and_design",
+        team: "ASCEND",
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.member.department).toBe("social_and_design");
+    expect(body.member.team).toBe("ASCEND");
+  });
+
+  it("canEditProfile is false with an active claim (blocks editing with 403)", async () => {
+    db.claim.count.mockImplementation(async ({ where }: { where?: any }) => {
+      if (where?.status?.in?.includes("active")) {
+        return 1;
+      }
+      return 0;
+    });
 
     const res = await app.inject({
       method: "PATCH",
@@ -1068,8 +1108,57 @@ describe("PATCH /api/dashboard/profile — self-correction rules", () => {
     expect(body.message).toContain("cannot be changed after making claims");
   });
 
-  it("blocks profile change with 403 when member has at least one PR", async () => {
-    // Mock 1 PR
+  it("canEditProfile is false with a pr_raised claim (blocks editing with 403)", async () => {
+    db.claim.count.mockImplementation(async ({ where }: { where?: any }) => {
+      if (where?.status?.in?.includes("pr_raised")) {
+        return 1;
+      }
+      return 0;
+    });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/dashboard/profile",
+      headers: {
+        cookie: sessionCookie,
+        "x-csrf-token": csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        department: "pr",
+        team: "CIPHER",
+      }),
+    });
+
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("canEditProfile is false with a merged claim (blocks editing with 403)", async () => {
+    db.claim.count.mockImplementation(async ({ where }: { where?: any }) => {
+      if (where?.status?.in?.includes("merged")) {
+        return 1;
+      }
+      return 0;
+    });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/dashboard/profile",
+      headers: {
+        cookie: sessionCookie,
+        "x-csrf-token": csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        department: "pr",
+        team: "CIPHER",
+      }),
+    });
+
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("canEditProfile is false with any PR (blocks editing with 403)", async () => {
     db.pullRequest.count.mockImplementation(async () => 1);
 
     const res = await app.inject({
@@ -1089,6 +1178,41 @@ describe("PATCH /api/dashboard/profile — self-correction rules", () => {
     expect(res.statusCode).toBe(403);
     const body = JSON.parse(res.body);
     expect(body.message).toContain("cannot be changed after making claims");
+  });
+
+  it("GET /api/dashboard returns canEditProfile: true with 0 active/pr_raised/merged claims and 0 PRs", async () => {
+    db.claim.count.mockImplementation(async ({ where }: { where?: any }) => {
+      if (where?.status?.in) return 0; // 0 committed claims
+      return 2; // e.g. 2 released/expired claims
+    });
+    db.pullRequest.count.mockImplementation(async () => 0);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/dashboard",
+      headers: { cookie: sessionCookie },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.member.canEditProfile).toBe(true);
+  });
+
+  it("GET /api/dashboard returns canEditProfile: false when member has an active claim", async () => {
+    db.claim.count.mockImplementation(async ({ where }: { where?: any }) => {
+      if (where?.status?.in) return 1; // 1 active claim
+      return 1;
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/dashboard",
+      headers: { cookie: sessionCookie },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.member.canEditProfile).toBe(false);
   });
 });
 
