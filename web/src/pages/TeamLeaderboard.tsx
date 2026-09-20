@@ -5,6 +5,7 @@ import { Trophy, RefreshCw, ChevronDown, ChevronUp, Sparkles } from "lucide-reac
 
 export const TeamLeaderboard: React.FC<{ initialData?: TeamScore[] }> = ({ initialData }) => {
   const [teams, setTeams] = useState<TeamScore[]>(initialData || []);
+  const [isEventOver, setIsEventOver] = useState<boolean>(false);
   const [loading, setLoading] = useState(!initialData);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
@@ -16,7 +17,8 @@ export const TeamLeaderboard: React.FC<{ initialData?: TeamScore[] }> = ({ initi
       setLoading(true);
       setError(null);
       const data = await fetchTeamLeaderboard();
-      setTeams(data);
+      setTeams(data.teams);
+      setIsEventOver(Boolean(data.isEventOver));
       setLastRefreshed(new Date());
       setCountdown(60);
     } catch (err: any) {
@@ -229,12 +231,23 @@ export const TeamLeaderboard: React.FC<{ initialData?: TeamScore[] }> = ({ initi
                         {t.challengeTotal} pts
                       </td>
                       <td style={{ padding: "1rem", textAlign: "right" }}>
-                        {t.bonuses && t.bonuses.totalBonus > 0 ? (
+                        {isEventOver && t.bonuses && t.bonuses.totalBonus > 0 ? (
                           <span style={{ color: "#fbbf24", fontWeight: 700, fontFamily: "var(--font-mono)" }}>
                             +{t.bonuses.totalBonus} pts
                           </span>
-                        ) : (
+                        ) : isEventOver ? (
                           <span style={{ color: "#64748b" }}>0</span>
+                        ) : (
+                          <span
+                            title="Awarded at final standings"
+                            style={{
+                              color: "#94a3b8",
+                              fontWeight: 600,
+                              cursor: "help",
+                            }}
+                          >
+                            —
+                          </span>
                         )}
                       </td>
                       <td style={{ padding: "1rem 1.25rem", textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 800, fontSize: "1.15rem", color: "#38bdf8" }}>
@@ -308,6 +321,23 @@ export const TeamLeaderboard: React.FC<{ initialData?: TeamScore[] }> = ({ initi
             </tbody>
           </table>
         </div>
+        {!isEventOver && (
+          <div
+            style={{
+              padding: "0.75rem 1.25rem",
+              borderTop: "1px solid #1e293b",
+              background: "rgba(15, 23, 42, 0.4)",
+              color: "#94a3b8",
+              fontSize: "0.8rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+            }}
+          >
+            <Sparkles size={15} color="#38bdf8" />
+            <span>Bonuses (+20 winner, +15 runner-up, +15 most participation) are applied when the challenge closes.</span>
+          </div>
+        )}
       </div>
 
       {/* Bonus Summary Card (§ 2.6) */}

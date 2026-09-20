@@ -8,6 +8,7 @@
 import { FastifyPluginAsync } from "fastify";
 import { prisma } from "../db.js";
 import { getTeamScores, getAllMemberScores, getMemberScore } from "../domain/scoring.js";
+import { config } from "../config.js";
 
 export interface LeaderboardRoutesOptions {
   prismaClient?: typeof prisma;
@@ -31,7 +32,34 @@ export const leaderboardRoutes: FastifyPluginAsync<LeaderboardRoutesOptions> = a
    * Team standings with challenge scores, bonuses, and grand totals.
    */
   app.get("/leaderboard/teams", rateLimitConfig, async (_request, reply) => {
-    const teams = await getTeamScores(db);
+    let finalDeadline: Date | null = config.FINAL_DEADLINE ?? null;
+    let freezeStandings = false;
+
+    if (db?.systemConfig?.findMany) {
+      try {
+        const configs = await db.systemConfig.findMany({
+          where: { key: { in: ["final_deadline", "freeze_standings"] } },
+        });
+        const map = Object.fromEntries(configs.map((c: any) => [c.key, c.value]));
+        if (map["final_deadline"]) {
+          finalDeadline = new Date(map["final_deadline"]);
+        }
+        if (map["freeze_standings"] === "true") {
+          freezeStandings = true;
+        }
+      } catch {
+        // ignore in mock/test DBs
+      }
+    }
+
+    const isEventOver = freezeStandings || (finalDeadline !== null && Date.now() >= finalDeadline.getTime());
+
+    const teams = await getTeamScores(db, {
+      finalDeadline,
+      freezeStandings,
+      applyBonuses: isEventOver,
+    });
+
     // Sanitize member scores in teams to exclude sensitive data
     const sanitized = teams.map((team) => ({
       team: team.team,
@@ -59,6 +87,8 @@ export const leaderboardRoutes: FastifyPluginAsync<LeaderboardRoutesOptions> = a
     return reply.status(200).send({
       statusCode: 200,
       teams: sanitized,
+      isEventOver,
+      finalDeadline: finalDeadline ? finalDeadline.toISOString() : null,
     });
   });
 

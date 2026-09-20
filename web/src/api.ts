@@ -1,14 +1,18 @@
-import { TeamScore, MemberScore, IssueItem, UserAuth, DashboardData } from "./types.js";
+import { MemberScore, IssueItem, UserAuth, DashboardData, TeamLeaderboardResponse } from "./types.js";
 
 const API_BASE = "";
 
-export async function fetchTeamLeaderboard(): Promise<TeamScore[]> {
+export async function fetchTeamLeaderboard(): Promise<TeamLeaderboardResponse> {
   const res = await fetch(`${API_BASE}/api/leaderboard/teams`, {
     headers: { Accept: "application/json" },
   });
   if (!res.ok) throw new Error(`Failed to load team leaderboard: ${res.statusText}`);
   const data = await res.json();
-  return data.teams || [];
+  return {
+    teams: data.teams || [],
+    isEventOver: data.isEventOver ?? false,
+    finalDeadline: data.finalDeadline ?? null,
+  };
 }
 
 export async function fetchMemberLeaderboard(): Promise<MemberScore[]> {

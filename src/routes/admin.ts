@@ -693,11 +693,11 @@ export const adminRoutes: FastifyPluginAsync<AdminRoutesOptions> = async (app, o
 
   /**
    * GET /api/admin/event
-   * Return current event settings (registration state, final deadline).
+   * Return current event settings (registration state, final deadline, freeze standings).
    */
   app.get("/event", async (_request, reply) => {
     const configs = await db.systemConfig.findMany({
-      where: { key: { in: [REGISTRATION_CONFIG_KEY, "final_deadline"] } },
+      where: { key: { in: [REGISTRATION_CONFIG_KEY, "final_deadline", "freeze_standings"] } },
     });
     const map = Object.fromEntries(configs.map((c) => [c.key, c.value]));
 
@@ -705,19 +705,21 @@ export const adminRoutes: FastifyPluginAsync<AdminRoutesOptions> = async (app, o
       statusCode: 200,
       registrationOpen: map[REGISTRATION_CONFIG_KEY] !== "false",
       finalDeadline: map["final_deadline"] ?? config.FINAL_DEADLINE?.toISOString() ?? null,
+      freezeStandings: map["freeze_standings"] === "true",
     });
   });
 
   /**
    * PATCH /api/admin/event
-   * Set final deadline and/or toggle registration.
-   * Body: { open?: boolean, finalDeadline?: string (ISO-8601) }
+   * Set final deadline, freeze standings, and/or toggle registration.
+   * Body: { open?: boolean, freezeStandings?: boolean, finalDeadline?: string (ISO-8601) }
    */
   app.patch<{ Body: unknown }>("/event", async (request, reply) => {
     const session = (request as any).session;
 
     const schema = z.object({
       open: z.boolean().optional(),
+      freezeStandings: z.boolean().optional(),
       finalDeadline: z
         .string()
         .refine((d) => !isNaN(new Date(d).getTime()), { message: "finalDeadline must be a valid ISO-8601 date" })
@@ -733,11 +735,11 @@ export const adminRoutes: FastifyPluginAsync<AdminRoutesOptions> = async (app, o
       });
     }
 
-    if (parsed.data.open == null && !parsed.data.finalDeadline) {
+    if (parsed.data.open == null && parsed.data.freezeStandings == null && !parsed.data.finalDeadline) {
       return reply.status(400).send({
         statusCode: 400,
         error: "Bad Request",
-        message: "At least one of: open, finalDeadline must be provided",
+        message: "At least one of: open, freezeStandings, finalDeadline must be provided",
       });
     }
 
@@ -751,6 +753,20 @@ export const adminRoutes: FastifyPluginAsync<AdminRoutesOptions> = async (app, o
         create: { key: REGISTRATION_CONFIG_KEY, value: val },
       });
       updates.push({ key: REGISTRATION_CONFIG_KEY, value: val, action: parsed.data.open ? "registration_unlocked" : "registration_locked" });
+    }
+
+    if (parsed.data.freezeStandings != null) {
+      const val = parsed.data.freezeStandings ? "true" : "false";
+      await db.systemConfig.upsert({
+        where: { key: "freeze_standings" },
+        update: { value: val },
+        create: { key: "freeze_standings", value: val },
+      });
+      updates.push({
+        key: "freeze_standings",
+        value: val,
+        action: parsed.data.freezeStandings ? "standings_frozen" : "standings_unfrozen",
+      });
     }
 
     if (parsed.data.finalDeadline) {

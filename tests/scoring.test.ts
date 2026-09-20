@@ -344,9 +344,132 @@ describe("Team Scoring and Bonus Calculation (§ 2.6)", () => {
     expect(bb.bonuses.bonusPoints).toBe(0);
     expect(bb.grandTotal).toBe(0);
   });
+
+  it("gating on FINAL_DEADLINE: before deadline, bonusPoints is 0 for every team and grandTotal equals challengeTotal", () => {
+    const rawTeams = [
+      { team: Team.BYTE_BRIGADE, teamName: "BYTE_BRIGADE", memberScores: [], challengeTotal: 30, totalPrs: 5, mergedPrs: 3 },
+      { team: Team.ASCEND, teamName: "ASCEND", memberScores: [], challengeTotal: 10, totalPrs: 6, mergedPrs: 1 },
+      { team: Team.CIPHER, teamName: "CIPHER", memberScores: [], challengeTotal: 0, totalPrs: 0, mergedPrs: 0 },
+      { team: Team.ECHO, teamName: "ECHO", memberScores: [], challengeTotal: 0, totalPrs: 0, mergedPrs: 0 },
+      { team: Team.NEXUS, teamName: "NEXUS", memberScores: [], challengeTotal: 0, totalPrs: 0, mergedPrs: 0 },
+    ];
+
+    const now = new Date("2026-09-20T12:00:00.000Z");
+    const finalDeadline = new Date("2026-09-21T12:00:00.000Z"); // in future
+
+    const results = computeTeamBonuses(rawTeams, { now, finalDeadline });
+
+    for (const team of results) {
+      expect(team.bonuses.winner).toBe(false);
+      expect(team.bonuses.runnerUp).toBe(false);
+      expect(team.bonuses.mostParticipation).toBe(false);
+      expect(team.bonuses.bonusPoints).toBe(0);
+      expect(team.bonuses.totalBonus).toBe(0);
+      expect(team.grandTotal).toBe(team.challengeTotal);
+    }
+
+    // BYTE_BRIGADE is top on challengeTotal (30), grandTotal is 30 (not 50)
+    expect(results[0].team).toBe(Team.BYTE_BRIGADE);
+    expect(results[0].grandTotal).toBe(30);
+
+    // ASCEND is second on challengeTotal (10), grandTotal is 10 (not 40)
+    expect(results[1].team).toBe(Team.ASCEND);
+    expect(results[1].grandTotal).toBe(10);
+  });
+
+  it("gating on FINAL_DEADLINE: after deadline, bonuses apply (+20 winner, +15 runner-up, +15 most participation)", () => {
+    const rawTeams = [
+      { team: Team.BYTE_BRIGADE, teamName: "BYTE_BRIGADE", memberScores: [], challengeTotal: 30, totalPrs: 5, mergedPrs: 3 },
+      { team: Team.ASCEND, teamName: "ASCEND", memberScores: [], challengeTotal: 10, totalPrs: 6, mergedPrs: 1 },
+      { team: Team.CIPHER, teamName: "CIPHER", memberScores: [], challengeTotal: 0, totalPrs: 0, mergedPrs: 0 },
+      { team: Team.ECHO, teamName: "ECHO", memberScores: [], challengeTotal: 0, totalPrs: 0, mergedPrs: 0 },
+      { team: Team.NEXUS, teamName: "NEXUS", memberScores: [], challengeTotal: 0, totalPrs: 0, mergedPrs: 0 },
+    ];
+
+    const now = new Date("2026-09-22T12:00:00.000Z");
+    const finalDeadline = new Date("2026-09-21T12:00:00.000Z"); // in past
+
+    const results = computeTeamBonuses(rawTeams, { now, finalDeadline });
+
+    const bb = results.find((t) => t.team === Team.BYTE_BRIGADE)!;
+    expect(bb.bonuses.winner).toBe(true);
+    expect(bb.bonuses.runnerUp).toBe(false);
+    expect(bb.bonuses.mostParticipation).toBe(false);
+    expect(bb.bonuses.bonusPoints).toBe(20);
+    expect(bb.grandTotal).toBe(50); // 30 + 20
+
+    const ascend = results.find((t) => t.team === Team.ASCEND)!;
+    expect(ascend.bonuses.winner).toBe(false);
+    expect(ascend.bonuses.runnerUp).toBe(true);
+    expect(ascend.bonuses.mostParticipation).toBe(true);
+    expect(ascend.bonuses.bonusPoints).toBe(30); // 15 + 15
+    expect(ascend.grandTotal).toBe(40); // 10 + 30
+  });
+
+  it("gating with freezeStandings toggle: applies bonuses even if now < finalDeadline", () => {
+    const rawTeams = [
+      { team: Team.BYTE_BRIGADE, teamName: "BYTE_BRIGADE", memberScores: [], challengeTotal: 30, totalPrs: 5, mergedPrs: 3 },
+      { team: Team.ASCEND, teamName: "ASCEND", memberScores: [], challengeTotal: 10, totalPrs: 6, mergedPrs: 1 },
+    ];
+
+    const now = new Date("2026-09-20T12:00:00.000Z");
+    const finalDeadline = new Date("2026-09-25T12:00:00.000Z"); // far in future
+
+    const results = computeTeamBonuses(rawTeams, { now, finalDeadline, freezeStandings: true });
+
+    const bb = results.find((t) => t.team === Team.BYTE_BRIGADE)!;
+    expect(bb.bonuses.winner).toBe(true);
+    expect(bb.bonuses.bonusPoints).toBe(20);
+    expect(bb.grandTotal).toBe(50);
+  });
 });
 
 describe("API Endpoints — Leaderboard and Member Breakdown", () => {
+  it("GET /api/leaderboard/teams returns isEventOver and deferred bonuses while live", async () => {
+    const mockDb = {
+      member: {
+        findMany: async () => [
+          {
+            id: "mem-bb",
+            displayName: "Dave BB",
+            githubLogin: "dave-bb",
+            department: Department.technical,
+            team: Team.BYTE_BRIGADE,
+            tier: Tier.tech,
+            pullRequests: [
+              { id: "pr-1", number: 1, merged: true, countsForScore: true, issue: { number: 1, level: IssueLevel.hard, repo: { name: "aqua-sense" } } },
+              { id: "pr-2", number: 2, merged: false, countsForScore: true, issue: { number: 2, level: IssueLevel.hard, repo: { name: "aqua-sense" } } },
+            ],
+          },
+        ],
+      },
+      systemConfig: {
+        findMany: async () => [
+          { key: "final_deadline", value: new Date(Date.now() + 86400000).toISOString() },
+          { key: "freeze_standings", value: "false" },
+        ],
+      },
+      $queryRaw: async () => [{ 1: 1 }],
+    } as any;
+
+    const app = await buildApp({ prismaClient: mockDb, disableLogging: true });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/leaderboard/teams",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.isEventOver).toBe(false);
+    expect(body.teams).toBeDefined();
+
+    const bb = body.teams.find((t: any) => t.team === Team.BYTE_BRIGADE);
+    expect(bb.challengeTotal).toBe(25); // 20 + 5
+    expect(bb.bonuses.totalBonus).toBe(0);
+    expect(bb.grandTotal).toBe(25); // Equals challengeTotal while live!
+  });
+
   it("GET /api/members/:id/breakdown reconciles: PRs sum to raw, raw caps to final", async () => {
     const mockDb = {
       member: {

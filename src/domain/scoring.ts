@@ -6,6 +6,7 @@
  */
 
 import { PrismaClient, Team, Tier, IssueLevel, Department } from "@prisma/client";
+import { config } from "../config.js";
 
 export interface PRScoringBreakdown {
   prId: string;
@@ -203,20 +204,69 @@ const ALL_TEAMS: Team[] = [
   Team.ECHO,
 ];
 
+export interface ComputeTeamBonusesOptions {
+  now?: Date;
+  finalDeadline?: Date | null;
+  freezeStandings?: boolean;
+  applyBonuses?: boolean;
+}
+
 /**
- * Computes team bonuses and grand totals according to CONTEXT.md § 2.6:
- *  - Winner (+20): highest team challenge score
- *  - Runner-up (+15): second highest
- *  - Most Participation (+15): team other than the winner whose members raised the most PRs total (countsForScore = true)
+ * Computes team bonuses and grand totals according to CONTEXT.md § 2.6 & § 9.12:
+ *  - While event is live (now < FINAL_DEADLINE and not frozen):
+ *      bonuses are 0 and grandTotal equals challengeTotal (capped base).
+ *  - Once event is over (now >= FINAL_DEADLINE or standings frozen):
+ *      - Winner (+20): highest team challenge score
+ *      - Runner-up (+15): second highest
+ *      - Most Participation (+15): team other than the winner whose members raised the most PRs total (countsForScore = true)
  *
  * Tie-breaking rules:
  *  - Winner / Runner-up: challengeTotal desc -> mergedPrs desc -> alphabetical teamName asc
  *  - Most Participation: totalPrs desc -> mergedPrs desc -> alphabetical teamName asc
  */
 export function computeTeamBonuses(
-  rawTeams: Omit<TeamScoreResult, "bonuses" | "grandTotal">[]
+  rawTeams: Omit<TeamScoreResult, "bonuses" | "grandTotal">[],
+  options?: ComputeTeamBonusesOptions
 ): TeamScoreResult[] {
   if (rawTeams.length === 0) return [];
+
+  // Determine whether bonuses should be applied to grandTotal
+  let isEventOver: boolean;
+  if (options?.applyBonuses !== undefined) {
+    isEventOver = options.applyBonuses;
+  } else if (options?.freezeStandings === true) {
+    isEventOver = true;
+  } else if (options?.finalDeadline !== undefined) {
+    if (options.finalDeadline === null) {
+      isEventOver = false;
+    } else {
+      const nowTime = (options.now ?? new Date()).getTime();
+      isEventOver = nowTime >= options.finalDeadline.getTime();
+    }
+  } else {
+    // If no options provided, default to applying bonuses for standalone formula assertions
+    isEventOver = true;
+  }
+
+  if (!isEventOver) {
+    return rawTeams
+      .map((team) => ({
+        ...team,
+        bonuses: {
+          winner: false,
+          runnerUp: false,
+          mostParticipation: false,
+          totalBonus: 0,
+          bonusPoints: 0,
+        },
+        grandTotal: team.challengeTotal,
+      }))
+      .sort((a, b) => {
+        if (b.challengeTotal !== a.challengeTotal) return b.challengeTotal - a.challengeTotal;
+        if (b.mergedPrs !== a.mergedPrs) return b.mergedPrs - a.mergedPrs;
+        return a.teamName.localeCompare(b.teamName);
+      });
+  }
 
   // Sort by challenge standings with tie-breakers
   const rankedForChallenge = [...rawTeams].sort((a, b) => {
@@ -252,33 +302,35 @@ export function computeTeamBonuses(
 
   const mostParticipationTeam = rankedForParticipation[0] ?? null;
 
-  return rawTeams.map((team) => {
-    const isWinner = winnerTeam ? team.team === winnerTeam.team : false;
-    const isRunnerUp = runnerUpTeam ? team.team === runnerUpTeam.team : false;
-    const isMostParticipation = mostParticipationTeam ? team.team === mostParticipationTeam.team : false;
+  return rawTeams
+    .map((team) => {
+      const isWinner = winnerTeam ? team.team === winnerTeam.team : false;
+      const isRunnerUp = runnerUpTeam ? team.team === runnerUpTeam.team : false;
+      const isMostParticipation = mostParticipationTeam ? team.team === mostParticipationTeam.team : false;
 
-    let bonusPoints = 0;
-    if (isWinner) bonusPoints += 20;
-    if (isRunnerUp) bonusPoints += 15;
-    if (isMostParticipation) bonusPoints += 15;
+      let bonusPoints = 0;
+      if (isWinner) bonusPoints += 20;
+      if (isRunnerUp) bonusPoints += 15;
+      if (isMostParticipation) bonusPoints += 15;
 
-    return {
-      ...team,
-      bonuses: {
-        winner: isWinner,
-        runnerUp: isRunnerUp,
-        mostParticipation: isMostParticipation,
-        totalBonus: bonusPoints,
-        bonusPoints,
-      },
-      grandTotal: team.challengeTotal + bonusPoints,
-    };
-  }).sort((a, b) => {
-    if (b.grandTotal !== a.grandTotal) return b.grandTotal - a.grandTotal;
-    if (b.challengeTotal !== a.challengeTotal) return b.challengeTotal - a.challengeTotal;
-    if (b.mergedPrs !== a.mergedPrs) return b.mergedPrs - a.mergedPrs;
-    return a.teamName.localeCompare(b.teamName);
-  });
+      return {
+        ...team,
+        bonuses: {
+          winner: isWinner,
+          runnerUp: isRunnerUp,
+          mostParticipation: isMostParticipation,
+          totalBonus: bonusPoints,
+          bonusPoints,
+        },
+        grandTotal: team.challengeTotal + bonusPoints,
+      };
+    })
+    .sort((a, b) => {
+      if (b.grandTotal !== a.grandTotal) return b.grandTotal - a.grandTotal;
+      if (b.challengeTotal !== a.challengeTotal) return b.challengeTotal - a.challengeTotal;
+      if (b.mergedPrs !== a.mergedPrs) return b.mergedPrs - a.mergedPrs;
+      return a.teamName.localeCompare(b.teamName);
+    });
 }
 
 /**
@@ -286,9 +338,33 @@ export function computeTeamBonuses(
  * Individual caps are applied per member BEFORE summing into team total.
  */
 export async function getTeamScores(
-  db: PrismaClient | any
+  db: PrismaClient | any,
+  options?: ComputeTeamBonusesOptions
 ): Promise<TeamScoreResult[]> {
   const allMembers = await getAllMemberScores(db);
+
+  let finalDeadline: Date | null =
+    options?.finalDeadline !== undefined ? options.finalDeadline : (config.FINAL_DEADLINE ?? null);
+  let freezeStandings: boolean = options?.freezeStandings !== undefined ? options.freezeStandings : false;
+
+  if (options?.finalDeadline === undefined || options?.freezeStandings === undefined) {
+    if (db?.systemConfig?.findMany) {
+      try {
+        const configs = await db.systemConfig.findMany({
+          where: { key: { in: ["final_deadline", "freeze_standings"] } },
+        });
+        const map = Object.fromEntries(configs.map((c: any) => [c.key, c.value]));
+        if (options?.finalDeadline === undefined && map["final_deadline"]) {
+          finalDeadline = new Date(map["final_deadline"]);
+        }
+        if (options?.freezeStandings === undefined && map["freeze_standings"] === "true") {
+          freezeStandings = true;
+        }
+      } catch {
+        // ignore in mock/test DBs
+      }
+    }
+  }
 
   const teamMap = new Map<Team, MemberScoreResult[]>();
   for (const team of ALL_TEAMS) {
@@ -317,5 +393,10 @@ export async function getTeamScores(
     };
   });
 
-  return computeTeamBonuses(rawTeams);
+  return computeTeamBonuses(rawTeams, {
+    now: options?.now,
+    finalDeadline,
+    freezeStandings,
+    applyBonuses: options?.applyBonuses,
+  });
 }

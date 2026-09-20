@@ -10,13 +10,20 @@ export interface TeamScore {
   totalPrs: number;
   mergedPrs: number;
   bonuses: {
-    winner: number;
-    runnerUp: number;
-    mostParticipation: number;
+    winner: boolean | number;
+    runnerUp: boolean | number;
+    mostParticipation: boolean | number;
     totalBonus: number;
+    bonusPoints?: number;
   };
   grandTotal: number;
   members: MemberScore[];
+}
+
+export interface TeamLeaderboardResponse {
+  teams: TeamScore[];
+  isEventOver?: boolean;
+  finalDeadline?: string | null;
 }
 
 export interface MemberScore {
