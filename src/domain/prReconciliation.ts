@@ -1,9 +1,9 @@
 /**
  * prReconciliation.ts
  *
- * Periodic background job that lists open and closed pull requests across all registered repos
- * via the GitHub API, reconciling any PR that has a parseable issue reference and a
- * matching claim, populating real githubPrIds, and accurately synchronizing merge states.
+ * Periodic background job that lists all pull requests (open, closed, merged) across all
+ * registered repos via the GitHub API, reconciling missing PR records, populating real
+ * githubPrIds, and accurately synchronizing merge states.
  *
  * Ensures lost opened and closed webhook deliveries self-heal automatically and idempotently.
  */
@@ -20,6 +20,7 @@ export interface ReconciliationOptions {
   githubClient?: GitHubApiClient;
   postReply?: (issueId: string, kind: string, body: string, memberId: string | null) => Promise<void>;
   postPrReply?: (owner: string, repo: string, prNumber: number, kind: string, body: string, memberId: string | null) => Promise<void>;
+  finalDeadline?: Date;
 }
 
 export interface PRChangeRecord {
@@ -55,6 +56,18 @@ export interface ReconciliationResult {
   changedRows: PRChangeRecord[];
 }
 
+export interface GitHubPRSummary {
+  id: number;
+  number: number;
+  title: string;
+  body: string | null;
+  state: string;
+  isMerged: boolean;
+  closedAt: Date | null;
+  createdAt: string;
+  login: string;
+}
+
 let sharedApiClient: GitHubApiClient | null = null;
 
 function getOrCreateGitHubClient(): GitHubApiClient | null {
@@ -79,6 +92,217 @@ function getOrCreateGitHubClient(): GitHubApiClient | null {
     }
   }
   return null;
+}
+
+/**
+ * Reconciles the merge state of pull requests in the database against GitHub API.
+ *  - For PRs merged on GitHub (merged_at != null) with DB merged=false:
+ *      Sets merged=true, closedAt, claim.status=merged, drops any other PR on the issue to merged=false,
+ *      and honours FINAL_DEADLINE zero-score rule.
+ *  - For the reverse (DB merged=true but GitHub not merged):
+ *      Corrects DB merged=false and demotes claim.
+ *  - Idempotent: rows already in agreement are untouched.
+ */
+export async function reconcileMergeState(
+  db: PrismaClient | any,
+  opts: ReconciliationOptions = {},
+  prefetchedGhMap?: Map<string, GitHubPRSummary>
+): Promise<{
+  updatedCount: number;
+  changedRows: PRChangeRecord[];
+}> {
+  const client = opts.githubClient ?? getOrCreateGitHubClient();
+  const finalDeadline = opts.finalDeadline ?? config.FINAL_DEADLINE;
+
+  const result = {
+    updatedCount: 0,
+    changedRows: [] as PRChangeRecord[],
+  };
+
+  let ghMap = prefetchedGhMap;
+  if (!ghMap) {
+    ghMap = new Map<string, GitHubPRSummary>();
+    if (client) {
+      const repos = await db.repo.findMany();
+      for (const repo of repos) {
+        try {
+          const pulls = client.listAllPullRequests
+            ? await client.listAllPullRequests(repo.owner, repo.name)
+            : await (client.listPullRequests ? client.listPullRequests(repo.owner, repo.name, "all") : client.listOpenPullRequests(repo.owner, repo.name));
+          for (const pull of pulls) {
+            const isMerged = (pull.merged_at != null) || ((pull as any).merged === true);
+            const closedAt = pull.closed_at ? new Date(pull.closed_at) : (pull.merged_at ? new Date(pull.merged_at) : null);
+            ghMap.set(`${repo.id}:${pull.number}`, {
+              id: pull.id,
+              number: pull.number,
+              title: pull.title || "",
+              body: pull.body ?? null,
+              state: pull.state ?? "open",
+              isMerged,
+              closedAt,
+              createdAt: pull.created_at,
+              login: pull.user?.login || "",
+            });
+          }
+        } catch (err) {
+          console.error(`[reconcileMergeState] Failed to fetch PRs for ${repo.owner}/${repo.name}:`, err);
+        }
+      }
+    }
+  }
+
+  // Fetch all issues that have pull requests linked
+  const issuesWithPrs = await db.issue.findMany({
+    where: {
+      pullRequests: {
+        some: { countsForScore: true },
+      },
+    },
+    include: {
+      repo: true,
+      pullRequests: {
+        where: { countsForScore: true },
+        include: { member: true, repo: true },
+      },
+      claims: true,
+    },
+  });
+
+  for (const issue of issuesWithPrs) {
+    const prs = issue.pullRequests;
+    if (!prs || prs.length === 0) continue;
+
+    // Check GitHub status for each PR
+    const prInfoList = prs.map((pr: any) => {
+      const ghInfo = ghMap?.get(`${pr.repoId}:${pr.number}`);
+      const isMergedOnGitHub = ghInfo ? ghInfo.isMerged : pr.merged;
+      const closedAt = ghInfo?.closedAt ?? (pr.closedAt ? new Date(pr.closedAt) : null);
+      return {
+        pr,
+        isMergedOnGitHub,
+        closedAt,
+      };
+    });
+
+    const mergedPrsOnGh = prInfoList.filter((p: any) => p.isMergedOnGitHub);
+
+    if (mergedPrsOnGh.length > 0) {
+      // Find the PR with the EARLIEST merge timestamp
+      const sortedMerged = [...mergedPrsOnGh].sort((a: any, b: any) => {
+        const tA = a.closedAt ? new Date(a.closedAt).getTime() : 0;
+        const tB = b.closedAt ? new Date(b.closedAt).getTime() : 0;
+        return tA - tB;
+      });
+
+      const firstMerged = sortedMerged[0]!;
+
+      for (const item of prInfoList) {
+        const pr = item.pr;
+        const shouldBeMerged = pr.id === firstMerged.pr.id;
+        const closedAtDate = item.closedAt ?? pr.closedAt ?? new Date();
+
+        let countsForScore = pr.countsForScore;
+        if (finalDeadline && closedAtDate > finalDeadline) {
+          countsForScore = false;
+        }
+
+        const wasMerged = pr.merged;
+        const hadCounts = pr.countsForScore;
+
+        if (
+          wasMerged !== shouldBeMerged ||
+          hadCounts !== countsForScore ||
+          (pr.closedAt && closedAtDate && pr.closedAt.toISOString() !== closedAtDate.toISOString()) ||
+          (!pr.closedAt && closedAtDate)
+        ) {
+          await db.pullRequest.update({
+            where: { id: pr.id },
+            data: {
+              merged: shouldBeMerged,
+              closedAt: closedAtDate,
+              countsForScore,
+            },
+          });
+
+          result.updatedCount++;
+          result.changedRows.push({
+            repo: `${pr.repo.owner}/${pr.repo.name}`,
+            prNumber: pr.number,
+            issueNumber: issue.number,
+            author: pr.member.githubLogin,
+            action: "merge_status_corrected",
+            before: {
+              merged: wasMerged,
+              countsForScore: hadCounts,
+            },
+            after: {
+              merged: shouldBeMerged,
+              countsForScore,
+            },
+          });
+        }
+
+        // Update corresponding claim status
+        if (shouldBeMerged && countsForScore) {
+          await db.claim.updateMany({
+            where: {
+              issueId: issue.id,
+              memberId: pr.memberId,
+            },
+            data: {
+              status: ClaimStatus.merged,
+            },
+          });
+        } else if (countsForScore) {
+          const memberClaim = issue.claims.find((c: any) => c.memberId === pr.memberId);
+          if (memberClaim && memberClaim.status === ClaimStatus.active) {
+            await db.claim.update({
+              where: { id: memberClaim.id },
+              data: {
+                status: ClaimStatus.pr_raised,
+              },
+            });
+          }
+        }
+      }
+    } else {
+      // None merged on GitHub: correct reverse case if DB had merged=true
+      for (const item of prInfoList) {
+        const pr = item.pr;
+        if (pr.merged) {
+          await db.pullRequest.update({
+            where: { id: pr.id },
+            data: { merged: false },
+          });
+
+          // Demote claim from merged to pr_raised if needed
+          await db.claim.updateMany({
+            where: {
+              issueId: issue.id,
+              memberId: pr.memberId,
+              status: ClaimStatus.merged,
+            },
+            data: {
+              status: ClaimStatus.pr_raised,
+            },
+          });
+
+          result.updatedCount++;
+          result.changedRows.push({
+            repo: `${pr.repo.owner}/${pr.repo.name}`,
+            prNumber: pr.number,
+            issueNumber: issue.number,
+            author: pr.member.githubLogin,
+            action: "merge_status_corrected",
+            before: { merged: true },
+            after: { merged: false },
+          });
+        }
+      }
+    }
+  }
+
+  return result;
 }
 
 export async function runPrReconciliation(
@@ -114,24 +338,14 @@ export async function runPrReconciliation(
   const repos = await db.repo.findMany();
 
   // Map to store GitHub PR info per (repoId:prNumber)
-  const ghPrMap = new Map<
-    string,
-    {
-      id: number;
-      number: number;
-      title: string;
-      body: string | null;
-      state: string;
-      isMerged: boolean;
-      closedAt: Date | null;
-      createdAt: string;
-      login: string;
-    }
-  >();
+  const ghPrMap = new Map<string, GitHubPRSummary>();
 
   for (const repo of repos) {
     try {
-      const allPulls = await client.listPullRequests(repo.owner, repo.name, "all");
+      // Use listAllPullRequests with state=all and pagination
+      const allPulls = client.listAllPullRequests
+        ? await client.listAllPullRequests(repo.owner, repo.name)
+        : await (client.listPullRequests ? client.listPullRequests(repo.owner, repo.name, "all") : client.listOpenPullRequests(repo.owner, repo.name));
       result.totalProcessedPrs += allPulls.length;
 
       for (const pull of allPulls) {
@@ -148,7 +362,7 @@ export async function runPrReconciliation(
           number: pull.number,
           title: pull.title || "",
           body: pull.body ?? null,
-          state: pull.state,
+          state: pull.state ?? "open",
           isMerged,
           closedAt,
           createdAt: pull.created_at,
@@ -267,141 +481,10 @@ export async function runPrReconciliation(
     }
   }
 
-  // 2. Multi-PR Merge State Reconciliation by Issue
-  // Fetch all issues that have pull requests linked
-  const issuesWithPrs = await db.issue.findMany({
-    where: {
-      pullRequests: {
-        some: { countsForScore: true },
-      },
-    },
-    include: {
-      repo: true,
-      pullRequests: {
-        where: { countsForScore: true },
-        include: { member: true, repo: true },
-      },
-      claims: true,
-    },
-  });
-
-  const finalDeadline = config.FINAL_DEADLINE;
-
-  for (const issue of issuesWithPrs) {
-    const prs = issue.pullRequests;
-    if (!prs || prs.length === 0) continue;
-
-    // Determine GitHub status for each PR
-    const prInfoList = prs.map((pr: any) => {
-      const ghInfo = ghPrMap.get(`${pr.repoId}:${pr.number}`);
-      const isMergedOnGitHub = ghInfo ? ghInfo.isMerged : pr.merged;
-      const closedAt = ghInfo?.closedAt ?? (pr.closedAt ? new Date(pr.closedAt) : null);
-      return {
-        pr,
-        isMergedOnGitHub,
-        closedAt,
-      };
-    });
-
-    const mergedPrsOnGh = prInfoList.filter((p: any) => p.isMergedOnGitHub);
-
-    if (mergedPrsOnGh.length > 0) {
-      // Find the PR with the EARLIEST merge timestamp
-      const sortedMerged = [...mergedPrsOnGh].sort((a: any, b: any) => {
-        const tA = a.closedAt ? new Date(a.closedAt).getTime() : 0;
-        const tB = b.closedAt ? new Date(b.closedAt).getTime() : 0;
-        return tA - tB;
-      });
-
-      const firstMerged = sortedMerged[0]!;
-
-      for (const item of prInfoList) {
-        const pr = item.pr;
-        const shouldBeMerged = pr.id === firstMerged.pr.id;
-        const closedAtDate = item.closedAt ?? pr.closedAt ?? new Date();
-        
-        let countsForScore = pr.countsForScore;
-        if (finalDeadline && closedAtDate > finalDeadline) {
-          countsForScore = false;
-        }
-
-        const wasMerged = pr.merged;
-        const hadCounts = pr.countsForScore;
-
-        if (wasMerged !== shouldBeMerged || hadCounts !== countsForScore || pr.closedAt?.toISOString() !== closedAtDate.toISOString()) {
-          await db.pullRequest.update({
-            where: { id: pr.id },
-            data: {
-              merged: shouldBeMerged,
-              closedAt: closedAtDate,
-              countsForScore,
-            },
-          });
-
-          result.updatedMergeCount++;
-          result.changedRows.push({
-            repo: `${pr.repo.owner}/${pr.repo.name}`,
-            prNumber: pr.number,
-            issueNumber: issue.number,
-            author: pr.member.githubLogin,
-            action: "merge_status_corrected",
-            before: {
-              merged: wasMerged,
-              countsForScore: hadCounts,
-            },
-            after: {
-              merged: shouldBeMerged,
-              countsForScore,
-            },
-          });
-        }
-
-        // Update corresponding claim status
-        if (shouldBeMerged && countsForScore) {
-          await db.claim.updateMany({
-            where: {
-              issueId: issue.id,
-              memberId: pr.memberId,
-            },
-            data: {
-              status: ClaimStatus.merged,
-            },
-          });
-        } else if (countsForScore) {
-          const memberClaim = issue.claims.find((c: any) => c.memberId === pr.memberId);
-          if (memberClaim && memberClaim.status === ClaimStatus.active) {
-            await db.claim.update({
-              where: { id: memberClaim.id },
-              data: {
-                status: ClaimStatus.pr_raised,
-              },
-            });
-          }
-        }
-      }
-    } else {
-      // None merged on GitHub
-      for (const item of prInfoList) {
-        const pr = item.pr;
-        if (pr.merged) {
-          await db.pullRequest.update({
-            where: { id: pr.id },
-            data: { merged: false },
-          });
-          result.updatedMergeCount++;
-          result.changedRows.push({
-            repo: `${pr.repo.owner}/${pr.repo.name}`,
-            prNumber: pr.number,
-            issueNumber: issue.number,
-            author: pr.member.githubLogin,
-            action: "merge_status_corrected",
-            before: { merged: true },
-            after: { merged: false },
-          });
-        }
-      }
-    }
-  }
+  // 2. Reconcile merge state (both forward and reverse, enforcing multi-PR conflict precedence)
+  const mergeResult = await reconcileMergeState(db, opts, ghPrMap);
+  result.updatedMergeCount = mergeResult.updatedCount;
+  result.changedRows.push(...mergeResult.changedRows);
 
   return result;
 }

@@ -275,5 +275,13 @@ describe("runPrReconciliation", () => {
     expect(pr30.merged).toBe(true);
     expect(pr24.merged).toBe(false);
     expect(claim30Status).toBe(ClaimStatus.merged);
+
+    // Running reconciliation a second time changes nothing
+    const secondResult = await runPrReconciliation(mockDb, {
+      githubClient: mockGithubClient,
+    });
+    expect(secondResult.recoveredCount).toBe(0);
+    expect(secondResult.updatedMergeCount).toBe(0);
+    expect(secondResult.changedRows).toHaveLength(0);
   });
 });

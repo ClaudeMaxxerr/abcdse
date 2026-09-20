@@ -143,33 +143,12 @@ export class GitHubApiClient {
   }
 
   /**
-   * Helper to list open pull requests for a repository.
-   */
-  public async listOpenPullRequests(
-    owner: string,
-    repo: string
-  ): Promise<
-    Array<{
-      id: number;
-      number: number;
-      title: string;
-      body: string | null;
-      created_at: string;
-      closed_at?: string | null;
-      merged_at?: string | null;
-      user: { id: number; login: string };
-    }>
-  > {
-    return this.listPullRequests(owner, repo, "open");
-  }
-
-  /**
-   * Helper to list pull requests with any state (open, closed, or all) for a repository.
+   * Helper to list pull requests for a repository with pagination and state filtering.
    */
   public async listPullRequests(
     owner: string,
     repo: string,
-    state: "open" | "closed" | "all" = "all"
+    state: "open" | "closed" | "all" = "open"
   ): Promise<
     Array<{
       id: number;
@@ -183,22 +162,90 @@ export class GitHubApiClient {
       user: { id: number; login: string };
     }>
   > {
-    const result = await this.request<
-      Array<{
-        id: number;
-        number: number;
-        title: string;
-        body: string | null;
-        state: string;
-        created_at: string;
-        closed_at?: string | null;
-        merged_at?: string | null;
-        user: { id: number; login: string };
-      }>
-    >(`/repos/${owner}/${repo}/pulls?state=${state}&per_page=100`, {
-      method: "GET",
-    });
-    return result.data || [];
+    const allPulls: Array<{
+      id: number;
+      number: number;
+      title: string;
+      body: string | null;
+      state: string;
+      created_at: string;
+      closed_at?: string | null;
+      merged_at?: string | null;
+      user: { id: number; login: string };
+    }> = [];
+
+    let page = 1;
+    while (true) {
+      const result = await this.request<
+        Array<{
+          id: number;
+          number: number;
+          title: string;
+          body: string | null;
+          state: string;
+          created_at: string;
+          closed_at?: string | null;
+          merged_at?: string | null;
+          user: { id: number; login: string };
+        }>
+      >(`/repos/${owner}/${repo}/pulls?state=${state}&per_page=100&page=${page}`, {
+        method: "GET",
+      });
+
+      const items = result.data || [];
+      allPulls.push(...items);
+
+      if (items.length < 100) {
+        break;
+      }
+      page++;
+    }
+
+    return allPulls;
+  }
+
+  /**
+   * Helper to list open pull requests for a repository.
+   */
+  public async listOpenPullRequests(
+    owner: string,
+    repo: string
+  ): Promise<
+    Array<{
+      id: number;
+      number: number;
+      title: string;
+      body: string | null;
+      state: string;
+      created_at: string;
+      closed_at?: string | null;
+      merged_at?: string | null;
+      user: { id: number; login: string };
+    }>
+  > {
+    return this.listPullRequests(owner, repo, "open");
+  }
+
+  /**
+   * Helper to list all pull requests (open, closed, merged) with pagination.
+   */
+  public async listAllPullRequests(
+    owner: string,
+    repo: string
+  ): Promise<
+    Array<{
+      id: number;
+      number: number;
+      title: string;
+      body: string | null;
+      state: string;
+      created_at: string;
+      closed_at?: string | null;
+      merged_at?: string | null;
+      user: { id: number; login: string };
+    }>
+  > {
+    return this.listPullRequests(owner, repo, "all");
   }
 
   /**
