@@ -106,7 +106,7 @@ export const MemberDashboard: React.FC<{ user: UserAuth | null; initialData?: Da
   }
 
   const { member, scoring, limits, activeClaims, waitlistEntries } = data;
-  const canEdit = member.canEditProfile ?? (limits.activeClaimsCount === 0 && scoring.totalPrs === 0 && data.historyClaims.length === 0);
+  const canEdit = member.canEditProfile === true || (member.canEditProfile === undefined && limits.activeClaimsCount === 0 && scoring.totalPrs === 0 && (data.historyClaims?.length ?? 0) === 0);
 
   return (
     <div className="animate-fade-in" style={{ maxWidth: "1300px", margin: "0 auto", padding: "1.5rem 1rem" }}>

@@ -100,7 +100,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   // Protects POST/PATCH/PUT/DELETE endpoints that use session cookies
   await app.register(fastifyCsrf, {
     sessionPlugin: "@fastify/cookie",
-    cookieOpts: { signed: true },
+    cookieOpts: {
+      path: "/",
+      signed: true,
+      httpOnly: true,
+      secure: config.NODE_ENV === "production",
+      sameSite: "lax",
+    },
   });
 
   // 4. Central Error Handler (Generic client messages, detailed server logs, no stack trace in response)

@@ -94,8 +94,11 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
       take: 20,
     });
 
-    // 4. Lifetime total claims count
-    const totalClaimsCount = await db.claim.count({
+    // 4. Claims and PR counts for self-correction eligibility (0 claims & 0 PRs)
+    const claimsCount = await db.claim.count({
+      where: { memberId },
+    });
+    const prsCount = await db.pullRequest.count({
       where: { memberId },
     });
 
@@ -134,7 +137,7 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
     const easyRemaining = isTech ? 0 : Math.max(0, 3 - easyClaimsCount);
     const freeActiveSlots = Math.max(0, 2 - activeClaims.length);
     const capReached = score.raw >= score.tierCap;
-    const canEditProfile = totalClaimsCount === 0 && score.totalPrs === 0;
+    const canEditProfile = Boolean(claimsCount === 0 && prsCount === 0);
 
     return reply.status(200).send({
       statusCode: 200,

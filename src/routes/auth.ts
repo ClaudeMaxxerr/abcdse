@@ -285,6 +285,13 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
       // Set signed httpOnly cookie per CONTEXT.md § 9.8
       reply.setCookie(SESSION_COOKIE_NAME, rawToken, COOKIE_OPTIONS);
 
+      // Also generate CSRF cookie so the frontend immediately has it
+      try {
+        reply.generateCsrf();
+      } catch {
+        // non-fatal
+      }
+
       // Redirect: new users go to registration, returning users go to dashboard.
       // Use RENDER_EXTERNAL_URL (auto-set by Render) so the redirect always lands
       // on the live site, never on localhost — even if CORS_ORIGIN still lists localhost.
