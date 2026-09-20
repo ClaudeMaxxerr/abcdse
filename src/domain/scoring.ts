@@ -37,6 +37,7 @@ export interface TeamBonusBreakdown {
   winner: boolean;
   runnerUp: boolean;
   mostParticipation: boolean;
+  totalBonus: number;
   bonusPoints: number;
 }
 
@@ -232,14 +233,14 @@ export function computeTeamBonuses(
 
   const secondCandidate = rankedForChallenge.length > 1 ? rankedForChallenge[1] : null;
   const runnerUpTeam =
-    secondCandidate && (secondCandidate.challengeTotal > 0 || secondCandidate.totalPrs > 0)
+    winnerTeam && secondCandidate && (secondCandidate.challengeTotal > 0 || secondCandidate.totalPrs > 0)
       ? secondCandidate
       : null;
 
   // Most participation: non-winner teams with at least 1 PR raised (totalPrs > 0)
   const nonWinners = winnerTeam
     ? rankedForChallenge.filter((t) => t.team !== winnerTeam.team)
-    : rankedForChallenge;
+    : [];
 
   const rankedForParticipation = [...nonWinners]
     .filter((t) => t.totalPrs > 0)
@@ -267,6 +268,7 @@ export function computeTeamBonuses(
         winner: isWinner,
         runnerUp: isRunnerUp,
         mostParticipation: isMostParticipation,
+        totalBonus: bonusPoints,
         bonusPoints,
       },
       grandTotal: team.challengeTotal + bonusPoints,

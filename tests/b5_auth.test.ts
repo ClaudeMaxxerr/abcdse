@@ -131,6 +131,16 @@ function makeMockDb() {
       findMany: vi.fn(async () => auditLogs),
     },
 
+    claim: {
+      count: vi.fn(async () => 0),
+      findMany: vi.fn(async () => []),
+    },
+
+    pullRequest: {
+      count: vi.fn(async () => 0),
+      findMany: vi.fn(async () => []),
+    },
+
     $queryRaw: vi.fn(async () => [{ "?column?": 1 }]),
     $disconnect: vi.fn(async () => {}),
   } as any;
@@ -343,10 +353,9 @@ describe("Registration — tier derivation", () => {
   const cases: Array<[Department, Tier]> = [
     [Department.technical, Tier.tech],
     [Department.pr, Tier.general],
-    [Department.social, Tier.general],
-    [Department.design, Tier.general],
-    [Department.event_management, Tier.general],
     [Department.research_and_development, Tier.general],
+    [Department.event_management, Tier.general],
+    [Department.social_and_design, Tier.general],
   ];
 
   for (const [dept, expectedTier] of cases) {
@@ -795,7 +804,7 @@ describe("POST /api/registration/complete — validation", () => {
     );
   });
 
-  it("accepts valid body and derives tier correctly (pr → general)", async () => {
+    it("accepts valid body and derives tier correctly (pr → general)", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/registration/complete",
@@ -812,6 +821,274 @@ describe("POST /api/registration/complete — validation", () => {
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.member.tier).toBe("general");
+  });
+
+  const departments = [
+    Department.technical,
+    Department.pr,
+    Department.research_and_development,
+    Department.event_management,
+    Department.social_and_design,
+  ];
+
+  const teams = [
+    Team.NEXUS,
+    Team.CIPHER,
+    Team.BYTE_BRIGADE,
+    Team.ASCEND,
+    Team.ECHO,
+  ];
+
+  for (const dept of departments) {
+    for (const tm of teams) {
+      it(`stores exactly submitted department '${dept}' and team '${tm}' (${dept} + ${tm})`, async () => {
+        const res = await app.inject({
+          method: "POST",
+          url: "/api/registration/complete",
+          headers: {
+            cookie: sessionCookie,
+            "x-csrf-token": csrfToken,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            department: dept,
+            team: tm,
+          }),
+        });
+
+        expect(res.statusCode).toBe(200);
+        const body = JSON.parse(res.body);
+        expect(body.member.department).toBe(dept);
+        expect(body.member.team).toBe(tm);
+        const expectedTier = dept === Department.technical ? "tech" : "general";
+        expect(body.member.tier).toBe(expectedTier);
+
+        expect(db.member.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: memberId },
+            data: expect.objectContaining({
+              department: dept,
+              team: tm,
+              tier: expectedTier,
+            }),
+          })
+        );
+      });
+    }
+  }
+
+  it("rejects missing department with 400", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/registration/complete",
+      headers: {
+        cookie: sessionCookie,
+        "x-csrf-token": csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        team: "NEXUS",
+      }),
+    });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.message).toBeTruthy();
+  });
+
+  it("rejects missing team with 400", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/registration/complete",
+      headers: {
+        cookie: sessionCookie,
+        "x-csrf-token": csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        department: "technical",
+      }),
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("rejects invalid department display name with 400 without defaulting", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/registration/complete",
+      headers: {
+        cookie: sessionCookie,
+        "x-csrf-token": csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        department: "Research & Dev",
+        team: "NEXUS",
+      }),
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("repeat registration submission updates member idempotently without failing", async () => {
+    // First registration
+    const res1 = await app.inject({
+      method: "POST",
+      url: "/api/registration/complete",
+      headers: {
+        cookie: sessionCookie,
+        "x-csrf-token": csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        department: "technical",
+        team: "ECHO",
+      }),
+    });
+    expect(res1.statusCode).toBe(200);
+
+    // Repeat registration (same member, changing to research_and_development + ASCEND)
+    const res2 = await app.inject({
+      method: "POST",
+      url: "/api/registration/complete",
+      headers: {
+        cookie: sessionCookie,
+        "x-csrf-token": csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        department: "research_and_development",
+        team: "ASCEND",
+      }),
+    });
+    expect(res2.statusCode).toBe(200);
+    const body2 = JSON.parse(res2.body);
+    expect(body2.member.department).toBe("research_and_development");
+    expect(body2.member.team).toBe("ASCEND");
+    expect(body2.member.tier).toBe("general");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5b. Member Dashboard profile self-correction
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("PATCH /api/dashboard/profile — self-correction rules", () => {
+  let app: FastifyInstance;
+  let db: ReturnType<typeof makeMockDb>;
+  let sessionCookie: string;
+  let csrfToken: string;
+  let memberId: string;
+
+  beforeEach(async () => {
+    _testClearStates();
+    db = makeMockDb();
+
+    memberId = "member-self-edit";
+    db._members.set(memberId, {
+      id: memberId,
+      githubUserId: 555n,
+      githubLogin: "selfeditor",
+      displayName: "Self Editor",
+      department: "technical",
+      team: "ECHO",
+      tier: "tech",
+      isAdmin: false,
+    });
+
+    app = await makeTestApp(db);
+
+    const rawToken = await createSession(db, memberId, "127.0.0.1", "test");
+    const signedSid = app.signCookie(rawToken);
+
+    const csrfRes = await app.inject({ method: "GET", url: "/auth/csrf" });
+    const csrfData = JSON.parse(csrfRes.body);
+    csrfToken = csrfData.csrfToken;
+    const csrfCookieHeader = csrfRes.headers["set-cookie"];
+    const csrfCookie = Array.isArray(csrfCookieHeader) ? csrfCookieHeader.join("; ") : (csrfCookieHeader || "");
+
+    sessionCookie = `${SESSION_COOKIE_NAME}=${signedSid}; ${csrfCookie}`;
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it("allows member to update department and team when 0 claims and 0 PRs and writes AuditLog", async () => {
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/dashboard/profile",
+      headers: {
+        cookie: sessionCookie,
+        "x-csrf-token": csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        department: "social_and_design",
+        team: "ASCEND",
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.member.department).toBe("social_and_design");
+    expect(body.member.team).toBe("ASCEND");
+    expect(body.member.tier).toBe("general");
+
+    // Check AuditLog was written
+    expect(db.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "member_self_corrected",
+          targetType: "Member",
+          targetId: memberId,
+        }),
+      })
+    );
+  });
+
+  it("blocks profile change with 403 when member has at least one claim", async () => {
+    // Mock 1 claim
+    db.claim.count.mockImplementation(async () => 1);
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/dashboard/profile",
+      headers: {
+        cookie: sessionCookie,
+        "x-csrf-token": csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        department: "pr",
+        team: "CIPHER",
+      }),
+    });
+
+    expect(res.statusCode).toBe(403);
+    const body = JSON.parse(res.body);
+    expect(body.message).toContain("cannot be changed after making claims");
+  });
+
+  it("blocks profile change with 403 when member has at least one PR", async () => {
+    // Mock 1 PR
+    db.pullRequest.count.mockImplementation(async () => 1);
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/dashboard/profile",
+      headers: {
+        cookie: sessionCookie,
+        "x-csrf-token": csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        department: "pr",
+        team: "CIPHER",
+      }),
+    });
+
+    expect(res.statusCode).toBe(403);
+    const body = JSON.parse(res.body);
+    expect(body.message).toContain("cannot be changed after making claims");
   });
 });
 

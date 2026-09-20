@@ -11,10 +11,20 @@ import { prisma } from "../db.js";
 import { resolveSession } from "../auth/session.js";
 import { readSessionToken } from "../auth/requestHelpers.js";
 import { getMemberScore } from "../domain/scoring.js";
+import { Department, Team } from "@prisma/client";
+import { z } from "zod";
+import { deriveTier, detectForbiddenFields } from "./registration.js";
 
 export interface DashboardRoutesOptions {
   prismaClient?: typeof prisma;
 }
+
+const profileUpdateSchema = z
+  .object({
+    department: z.nativeEnum(Department),
+    team: z.nativeEnum(Team),
+  })
+  .strict();
 
 export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async (app, opts) => {
   const db = opts.prismaClient ?? prisma;
@@ -84,7 +94,12 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
       take: 20,
     });
 
-    // 4. Easy claim usage (lifetime count of accepted Easy claims)
+    // 4. Lifetime total claims count
+    const totalClaimsCount = await db.claim.count({
+      where: { memberId },
+    });
+
+    // 5. Easy claim usage (lifetime count of accepted Easy claims)
     const easyClaimsCount = await db.claim.count({
       where: {
         memberId,
@@ -94,7 +109,7 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
       },
     });
 
-    // 5. Active waitlist entries
+    // 6. Active waitlist entries
     const waitlistEntries = await db.waitlistEntry.findMany({
       where: {
         memberId,
@@ -119,6 +134,7 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
     const easyRemaining = isTech ? 0 : Math.max(0, 3 - easyClaimsCount);
     const freeActiveSlots = Math.max(0, 2 - activeClaims.length);
     const capReached = score.raw >= score.tierCap;
+    const canEditProfile = totalClaimsCount === 0 && score.totalPrs === 0;
 
     return reply.status(200).send({
       statusCode: 200,
@@ -130,6 +146,7 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
         team: member.team,
         tier: member.tier,
         isAdmin: member.isAdmin,
+        canEditProfile,
       },
       scoring: {
         raw: score.raw,
@@ -189,4 +206,114 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
       })),
     });
   });
+
+  /**
+   * PATCH /api/dashboard/profile
+   * Allows a member to correct their own department & team.
+   * STRICT GUARD: ONLY allowed when member has 0 claims and 0 PRs.
+   * Audited.
+   */
+  const handleProfileUpdate = async (request: any, reply: any) => {
+    const rawToken = readSessionToken(request);
+    const session = await resolveSession(db, rawToken);
+
+    if (!session) {
+      return reply.status(401).send({
+        statusCode: 401,
+        error: "Unauthorized",
+        message: "Authentication required",
+      });
+    }
+
+    const memberId = session.memberId;
+
+    // Check claims & PR counts
+    const claimsCount = await db.claim.count({ where: { memberId } });
+    const prsCount = await db.pullRequest.count({ where: { memberId } });
+
+    if (claimsCount > 0 || prsCount > 0) {
+      return reply.status(403).send({
+        statusCode: 403,
+        error: "Forbidden",
+        message: "Department and team cannot be changed after making claims or submitting pull requests. Please contact an admin.",
+      });
+    }
+
+    // Mass-assignment defence
+    const forbidden = detectForbiddenFields(request.body);
+    if (forbidden.length > 0) {
+      return reply.status(400).send({
+        statusCode: 400,
+        error: "Bad Request",
+        message: `Request body must not contain: ${forbidden.join(", ")}`,
+      });
+    }
+
+    // Strict schema validation
+    const parsed = profileUpdateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        statusCode: 400,
+        error: "Bad Request",
+        message: parsed.error.issues.map((i) => i.message).join("; "),
+        details: parsed.error.issues,
+      });
+    }
+
+    const { department, team } = parsed.data;
+    const tier = deriveTier(department);
+
+    const beforeSnapshot = {
+      department: session.member.department,
+      team: session.member.team,
+      tier: session.member.tier,
+    };
+
+    const updated = await db.member.update({
+      where: { id: memberId },
+      data: {
+        department,
+        team,
+        tier,
+      },
+    });
+
+    await db.auditLog.create({
+      data: {
+        actorMemberId: memberId,
+        actorIp: request.ip,
+        action: "member_self_corrected",
+        targetType: "Member",
+        targetId: memberId,
+        beforeJson: JSON.stringify(beforeSnapshot),
+        afterJson: JSON.stringify({ department: updated.department, team: updated.team, tier: updated.tier }),
+      },
+    });
+
+    request.log.info(
+      {
+        memberId,
+        githubLogin: session.member.githubLogin,
+        department,
+        team,
+        tier,
+      },
+      "Member self-corrected department/team from dashboard"
+    );
+
+    return reply.status(200).send({
+      statusCode: 200,
+      message: "Profile updated successfully",
+      member: {
+        id: updated.id,
+        githubLogin: updated.githubLogin,
+        department: updated.department,
+        team: updated.team,
+        tier: updated.tier,
+      },
+    });
+  };
+
+  app.patch<{ Body: unknown }>("/dashboard/profile", { preHandler: app.csrfProtection }, handleProfileUpdate);
+  app.post<{ Body: unknown }>("/dashboard/profile", { preHandler: app.csrfProtection }, handleProfileUpdate);
 };

@@ -93,5 +93,27 @@ export async function completeRegistration(department: string, team: string): Pr
     credentials: "include",
     body: JSON.stringify({ department, team }),
   });
-  return res.ok;
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message || `Registration failed with status ${res.status}`);
+  }
+  return true;
+}
+
+export async function updateMemberProfile(department: string, team: string): Promise<{ ok: boolean; message?: string; member?: any }> {
+  const csrfToken = await fetchCsrfToken();
+  const res = await fetch(`${API_BASE}/api/dashboard/profile`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "x-csrf-token": csrfToken || "",
+    },
+    credentials: "include",
+    body: JSON.stringify({ department, team }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.message || `Profile update failed with status ${res.status}`);
+  }
+  return data;
 }

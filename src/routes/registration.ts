@@ -164,15 +164,52 @@ export const registrationRoutes: FastifyPluginAsync<RegistrationRoutesOptions> =
     // 5. Derive tier server-side — NEVER accept from client
     const tier = deriveTier(department);
 
-    // 6. Upsert member by githubUserId (the immutable numeric ID from GitHub API)
-    // This means re-registering updates the record instead of duplicating
-    await db.member.update({
+    // 6. Check if member already has active/past claims or PRs.
+    // If they have begun participating, they cannot modify department/team (admin-only).
+    const claimsCount = await db.claim.count({
+      where: { memberId: session.memberId },
+    });
+    const prsCount = await db.pullRequest.count({
+      where: { memberId: session.memberId },
+    });
+
+    if (claimsCount > 0 || prsCount > 0) {
+      if (session.member.department !== department || session.member.team !== team) {
+        return reply.status(403).send({
+          statusCode: 403,
+          error: "Forbidden",
+          message: "Department and team cannot be changed after making claims or submitting pull requests. Please contact an admin.",
+        });
+      }
+    }
+
+    const beforeSnapshot = {
+      department: session.member.department,
+      team: session.member.team,
+      tier: session.member.tier,
+    };
+
+    // 7. Update member by session.memberId
+    // This handles both initial registration and repeat submissions (idempotent update)
+    const updated = await db.member.update({
       where: { id: session.memberId },
       data: {
         department,
         team,
         tier,
-        // githubUserId and githubLogin are NOT updated here — they come from OAuth only
+      },
+    });
+
+    // 8. Write AuditLog row
+    await db.auditLog.create({
+      data: {
+        actorMemberId: session.memberId,
+        actorIp: request.ip,
+        action: "member_registered",
+        targetType: "Member",
+        targetId: session.memberId,
+        beforeJson: JSON.stringify(beforeSnapshot),
+        afterJson: JSON.stringify({ department: updated.department, team: updated.team, tier: updated.tier }),
       },
     });
 
@@ -191,9 +228,9 @@ export const registrationRoutes: FastifyPluginAsync<RegistrationRoutesOptions> =
       statusCode: 200,
       message: "Registration complete",
       member: {
-        department,
-        team,
-        tier,
+        department: updated.department,
+        team: updated.team,
+        tier: updated.tier,
       },
     });
   });

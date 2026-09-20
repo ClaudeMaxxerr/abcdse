@@ -185,7 +185,9 @@ export const adminRoutes: FastifyPluginAsync<AdminRoutesOptions> = async (app, o
         });
       }
 
-      const { department, team, tier } = parsed.data;
+      const { department, team } = parsed.data;
+      const tier = parsed.data.tier ?? (department ? (department === Department.technical ? Tier.tech : Tier.general) : undefined);
+
       if (!department && !team && !tier) {
         return reply.status(400).send({
           statusCode: 400,

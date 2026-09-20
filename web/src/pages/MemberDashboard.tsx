@@ -1,15 +1,22 @@
 import React, { useState, useEffect } from "react";
-import { DashboardData, UserAuth } from "../types.js";
-import { fetchDashboard } from "../api.js";
+import { DashboardData, UserAuth, Department, Team } from "../types.js";
+import { fetchDashboard, updateMemberProfile } from "../api.js";
 import { CapProgressBar } from "../components/CapProgressBar.js";
 import { Countdown } from "../components/Countdown.js";
 import { RuleNotice } from "../components/RuleNotice.js";
-import { Clock, CheckCircle2, GitPullRequest, Layers, LogIn, ExternalLink, Shield } from "lucide-react";
+import { Clock, CheckCircle2, GitPullRequest, Layers, LogIn, ExternalLink, Shield, Edit3, Check, X, Lock } from "lucide-react";
 
 export const MemberDashboard: React.FC<{ user: UserAuth | null; initialData?: DashboardData }> = ({ user, initialData }) => {
   const [data, setData] = useState<DashboardData | null>(initialData || null);
   const [loading, setLoading] = useState(!initialData);
   const [error, setError] = useState<string | null>(null);
+
+  // Profile editing state
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editDept, setEditDept] = useState<Department>("technical");
+  const [editTeam, setEditTeam] = useState<Team>("NEXUS");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileMsg, setProfileMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     if (!initialData && user) {
@@ -23,10 +30,30 @@ export const MemberDashboard: React.FC<{ user: UserAuth | null; initialData?: Da
       setError(null);
       const res = await fetchDashboard();
       setData(res);
+      if (res.member) {
+        setEditDept(res.member.department);
+        setEditTeam(res.member.team);
+      }
     } catch (err: any) {
       setError(err.message || "Failed to load dashboard data");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setSavingProfile(true);
+      setProfileMsg(null);
+      await updateMemberProfile(editDept, editTeam);
+      setProfileMsg({ type: "success", text: "Department & team updated successfully!" });
+      setIsEditingProfile(false);
+      await loadDashboard();
+    } catch (err: any) {
+      setProfileMsg({ type: "error", text: err.message || "Failed to update profile" });
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -79,6 +106,7 @@ export const MemberDashboard: React.FC<{ user: UserAuth | null; initialData?: Da
   }
 
   const { member, scoring, limits, activeClaims, waitlistEntries } = data;
+  const canEdit = member.canEditProfile ?? (limits.activeClaimsCount === 0 && scoring.totalPrs === 0 && data.historyClaims.length === 0);
 
   return (
     <div className="animate-fade-in" style={{ maxWidth: "1300px", margin: "0 auto", padding: "1.5rem 1rem" }}>
@@ -97,6 +125,29 @@ export const MemberDashboard: React.FC<{ user: UserAuth | null; initialData?: Da
               <span className="badge" style={{ background: "#1e293b", color: "#94a3b8", border: "1px solid #334155" }}>
                 {member.department}
               </span>
+
+              {/* Edit button / lock badge */}
+              {canEdit ? (
+                !isEditingProfile && (
+                  <button
+                    onClick={() => {
+                      setEditDept(member.department);
+                      setEditTeam(member.team);
+                      setIsEditingProfile(true);
+                      setProfileMsg(null);
+                    }}
+                    className="btn btn-secondary"
+                    style={{ fontSize: "0.75rem", padding: "0.2rem 0.6rem", marginLeft: "0.5rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
+                  >
+                    <Edit3 size={12} />
+                    <span>Edit Dept &amp; Team</span>
+                  </button>
+                )
+              ) : (
+                <span style={{ fontSize: "0.75rem", color: "#64748b", display: "inline-flex", alignItems: "center", gap: "0.3rem", marginLeft: "0.5rem" }}>
+                  <Lock size={12} /> Locked (has claims/PRs)
+                </span>
+              )}
             </div>
             <div style={{ fontSize: "0.85rem", color: "#64748b" }}>
               GitHub: <a href={`https://github.com/${member.githubLogin}`} target="_blank" rel="noreferrer" style={{ color: "#38bdf8", textDecoration: "none" }}>@{member.githubLogin}</a>
@@ -130,6 +181,74 @@ export const MemberDashboard: React.FC<{ user: UserAuth | null; initialData?: Da
             </div>
           </div>
         </div>
+
+        {/* Profile Edit Panel */}
+        {isEditingProfile && (
+          <form onSubmit={handleSaveProfile} style={{ marginTop: "1rem", padding: "1rem", background: "#0f172a", borderRadius: "8px", border: "1px solid #38bdf8" }}>
+            <div style={{ fontSize: "0.85rem", fontWeight: 700, color: "#f8fafc", marginBottom: "0.75rem" }}>
+              Correct Department &amp; Team (Allowed only with 0 claims and 0 PRs)
+            </div>
+            <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div style={{ flex: "1 1 200px" }}>
+                <label style={{ display: "block", fontSize: "0.75rem", color: "#94a3b8", marginBottom: "0.3rem" }}>Department</label>
+                <select
+                  value={editDept}
+                  onChange={(e) => setEditDept(e.target.value as Department)}
+                  style={{ width: "100%", padding: "0.4rem 0.6rem", background: "#1e293b", border: "1px solid #334155", borderRadius: "6px", color: "#fff", fontSize: "0.85rem" }}
+                >
+                  <option value="technical">Technical (60 pt cap)</option>
+                  <option value="pr">PR (80 pt cap)</option>
+                  <option value="research_and_development">Research &amp; Dev (80 pt cap)</option>
+                  <option value="event_management">Event Management (80 pt cap)</option>
+                  <option value="social_and_design">Social &amp; Design (80 pt cap)</option>
+                </select>
+              </div>
+
+              <div style={{ flex: "1 1 200px" }}>
+                <label style={{ display: "block", fontSize: "0.75rem", color: "#94a3b8", marginBottom: "0.3rem" }}>Assigned Team</label>
+                <select
+                  value={editTeam}
+                  onChange={(e) => setEditTeam(e.target.value as Team)}
+                  style={{ width: "100%", padding: "0.4rem 0.6rem", background: "#1e293b", border: "1px solid #334155", borderRadius: "6px", color: "#fff", fontSize: "0.85rem" }}
+                >
+                  <option value="NEXUS">Nexus</option>
+                  <option value="CIPHER">Cipher</option>
+                  <option value="BYTE_BRIGADE">Byte Brigade</option>
+                  <option value="ASCEND">Ascend</option>
+                  <option value="ECHO">Echo</option>
+                </select>
+              </div>
+
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button type="submit" disabled={savingProfile} className="btn btn-primary" style={{ padding: "0.4rem 0.8rem", fontSize: "0.85rem" }}>
+                  <Check size={14} />
+                  <span>{savingProfile ? "Saving..." : "Save Changes"}</span>
+                </button>
+                <button type="button" onClick={() => setIsEditingProfile(false)} className="btn btn-secondary" style={{ padding: "0.4rem 0.8rem", fontSize: "0.85rem" }}>
+                  <X size={14} />
+                  <span>Cancel</span>
+                </button>
+              </div>
+            </div>
+            <div style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: editDept === "technical" ? "#a5b4fc" : "#d8b4fe" }}>
+              Tier derived server-side: <strong>{editDept === "technical" ? "Technical (60 pt cap)" : "General (80 pt cap)"}</strong>
+            </div>
+          </form>
+        )}
+
+        {profileMsg && (
+          <div style={{
+            marginTop: "0.75rem",
+            padding: "0.5rem 0.75rem",
+            borderRadius: "6px",
+            fontSize: "0.8rem",
+            background: profileMsg.type === "success" ? "rgba(52, 211, 153, 0.15)" : "rgba(244, 63, 94, 0.15)",
+            border: profileMsg.type === "success" ? "1px solid rgba(52, 211, 153, 0.4)" : "1px solid rgba(244, 63, 94, 0.4)",
+            color: profileMsg.type === "success" ? "#6ee7b7" : "#fda4af",
+          }}>
+            {profileMsg.text}
+          </div>
+        )}
 
         {/* Cap Progress Bar Component */}
         <div style={{ marginTop: "1.25rem" }}>

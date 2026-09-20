@@ -14,12 +14,8 @@ export const RegisterPage: React.FC<{ onComplete: () => void }> = ({ onComplete 
     try {
       setSubmitting(true);
       setError(null);
-      const ok = await completeRegistration(department, team);
-      if (ok) {
-        onComplete();
-      } else {
-        setError("Failed to complete registration. Please try again.");
-      }
+      await completeRegistration(department, team);
+      onComplete();
     } catch (err: any) {
       setError(err.message || "Registration error");
     } finally {

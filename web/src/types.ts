@@ -105,6 +105,7 @@ export interface DashboardData {
     team: Team;
     tier: Tier;
     isAdmin: boolean;
+    canEditProfile?: boolean;
   };
   scoring: {
     raw: number;
