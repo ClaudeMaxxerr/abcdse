@@ -575,6 +575,197 @@ export const adminRoutes: FastifyPluginAsync<AdminRoutesOptions> = async (app, o
     }
   );
 
+  /**
+   * POST /api/admin/prs/link
+   * Manually link a PR to a claim/issue for recovery when webhook delivery was lost.
+   * Body: { repoOwner: string, repoName: string, prNumber: number, issueNumber: number, memberLogin?: string, reason?: string }
+   */
+  app.post<{ Body: unknown }>(
+    "/prs/link",
+    async (request, reply) => {
+      const session = (request as any).session;
+
+      const schema = z.object({
+        repoOwner: z.string().min(1),
+        repoName: z.string().min(1),
+        prNumber: z.number().int().positive(),
+        issueNumber: z.number().int().positive(),
+        memberLogin: z.string().optional(),
+        reason: z.string().min(3).optional().default("Manual link by admin"),
+      });
+
+      const parsed = schema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({
+          statusCode: 400,
+          error: "Bad Request",
+          message: parsed.error.issues.map((i) => i.message).join("; "),
+        });
+      }
+
+      const { repoOwner, repoName, prNumber, issueNumber, memberLogin, reason } = parsed.data;
+
+      // 1. Resolve repository
+      const repo = await db.repo.findFirst({
+        where: {
+          owner: { equals: repoOwner, mode: "insensitive" },
+          name: { equals: repoName, mode: "insensitive" },
+        },
+      });
+      if (!repo) {
+        return reply.status(404).send({
+          statusCode: 404,
+          error: "Not Found",
+          message: `Repository ${repoOwner}/${repoName} not found`,
+        });
+      }
+
+      // 2. Resolve issue
+      const issue = await db.issue.findFirst({
+        where: {
+          repoId: repo.id,
+          number: issueNumber,
+        },
+      });
+      if (!issue) {
+        return reply.status(404).send({
+          statusCode: 404,
+          error: "Not Found",
+          message: `Issue #${issueNumber} not found in repository ${repoOwner}/${repoName}`,
+        });
+      }
+
+      // 3. Resolve member & claim
+      let targetMemberId: string | null = null;
+      let targetClaim: any = null;
+
+      if (memberLogin) {
+        const member = await db.member.findFirst({
+          where: {
+            githubLogin: { equals: memberLogin, mode: "insensitive" },
+          },
+        });
+        if (!member) {
+          return reply.status(404).send({
+            statusCode: 404,
+            error: "Not Found",
+            message: `Member ${memberLogin} not found`,
+          });
+        }
+        targetMemberId = member.id;
+        targetClaim = await db.claim.findFirst({
+          where: {
+            issueId: issue.id,
+            memberId: member.id,
+          },
+        });
+      } else {
+        targetClaim = await db.claim.findFirst({
+          where: {
+            issueId: issue.id,
+            status: { in: [ClaimStatus.active, ClaimStatus.pr_raised] },
+          },
+          include: { member: true },
+        });
+        if (!targetClaim) {
+          targetClaim = await db.claim.findFirst({
+            where: { issueId: issue.id },
+            include: { member: true },
+          });
+        }
+        if (targetClaim) {
+          targetMemberId = targetClaim.memberId;
+        }
+      }
+
+      if (!targetMemberId || !targetClaim) {
+        return reply.status(400).send({
+          statusCode: 400,
+          error: "Bad Request",
+          message: `No claim found on issue #${issueNumber} to link PR #${prNumber} to.`,
+        });
+      }
+
+      // 4. Update or create PullRequest and update claim to pr_raised
+      let prRecord: any;
+      await db.$transaction(async (tx: any) => {
+        if (targetClaim.status !== ClaimStatus.pr_raised && targetClaim.status !== ClaimStatus.merged) {
+          await tx.claim.update({
+            where: { id: targetClaim.id },
+            data: { status: ClaimStatus.pr_raised },
+          });
+        }
+
+        const existingPr = await tx.pullRequest.findFirst({
+          where: {
+            repoId: repo.id,
+            number: prNumber,
+          },
+        });
+
+        if (existingPr) {
+          prRecord = await tx.pullRequest.update({
+            where: { id: existingPr.id },
+            data: {
+              issueId: issue.id,
+              memberId: targetMemberId!,
+              countsForScore: true,
+            },
+          });
+        } else {
+          prRecord = await tx.pullRequest.create({
+            data: {
+              repoId: repo.id,
+              number: prNumber,
+              githubPrId: BigInt(Date.now()),
+              memberId: targetMemberId!,
+              issueId: issue.id,
+              openedAt: new Date(),
+              merged: false,
+              countsForScore: true,
+            },
+          });
+        }
+      });
+
+      // 5. Audit log
+      await writeAudit(
+        db,
+        session?.memberId ?? null,
+        request.ip,
+        "pr_manually_linked",
+        "PullRequest",
+        prRecord.id,
+        { claimId: targetClaim.id, beforeStatus: targetClaim.status },
+        {
+          repo: `${repoOwner}/${repoName}`,
+          prNumber,
+          issueNumber,
+          memberId: targetMemberId,
+          reason,
+          prId: prRecord.id,
+          linkedAt: new Date().toISOString(),
+        }
+      );
+
+      return reply.status(200).send({
+        statusCode: 200,
+        message: `PR #${prNumber} successfully linked to issue #${issueNumber}`,
+        pullRequest: {
+          id: prRecord.id,
+          number: prRecord.number,
+          issueId: prRecord.issueId,
+          memberId: prRecord.memberId,
+          countsForScore: prRecord.countsForScore,
+        },
+        claim: {
+          id: targetClaim.id,
+          status: ClaimStatus.pr_raised,
+        },
+      });
+    }
+  );
+
   // =========================================================================
   // ISSUES
   // =========================================================================

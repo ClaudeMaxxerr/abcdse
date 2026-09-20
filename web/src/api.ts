@@ -70,15 +70,38 @@ export async function fetchCsrfToken(): Promise<string | null> {
   }
 }
 
+export async function fetchWithCsrf(url: string, init: RequestInit = {}): Promise<Response> {
+  const token = await fetchCsrfToken();
+  const headers = new Headers(init.headers || {});
+  if (token) {
+    headers.set("x-csrf-token", token);
+  }
+  const res = await fetch(url, {
+    ...init,
+    headers,
+    credentials: "include",
+  });
+
+  // If 403 Forbidden (e.g. CSRF secret was missing/mismatched on initial try), retry once with a freshly obtained token
+  if (res.status === 403) {
+    const freshToken = await fetchCsrfToken();
+    if (freshToken) {
+      headers.set("x-csrf-token", freshToken);
+      return await fetch(url, {
+        ...init,
+        headers,
+        credentials: "include",
+      });
+    }
+  }
+
+  return res;
+}
+
 export async function postLogout(): Promise<boolean> {
   try {
-    const csrfToken = await fetchCsrfToken();
-    const res = await fetch(`${API_BASE}/auth/logout`, {
+    const res = await fetchWithCsrf(`${API_BASE}/auth/logout`, {
       method: "POST",
-      headers: {
-        "x-csrf-token": csrfToken || "",
-      },
-      credentials: "include",
     });
     return res.ok;
   } catch {
@@ -87,14 +110,11 @@ export async function postLogout(): Promise<boolean> {
 }
 
 export async function completeRegistration(department: string, team: string): Promise<boolean> {
-  const csrfToken = await fetchCsrfToken();
-  const res = await fetch(`${API_BASE}/api/registration/complete`, {
+  const res = await fetchWithCsrf(`${API_BASE}/api/registration/complete`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-csrf-token": csrfToken || "",
     },
-    credentials: "include",
     body: JSON.stringify({ department, team }),
   });
   if (!res.ok) {
@@ -105,14 +125,11 @@ export async function completeRegistration(department: string, team: string): Pr
 }
 
 export async function updateMemberProfile(department: string, team: string): Promise<{ ok: boolean; message?: string; member?: any }> {
-  const csrfToken = await fetchCsrfToken();
-  const res = await fetch(`${API_BASE}/api/dashboard/profile`, {
+  const res = await fetchWithCsrf(`${API_BASE}/api/dashboard/profile`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
-      "x-csrf-token": csrfToken || "",
     },
-    credentials: "include",
     body: JSON.stringify({ department, team }),
   });
   const data = await res.json().catch(() => ({}));

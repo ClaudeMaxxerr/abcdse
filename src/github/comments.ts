@@ -110,3 +110,39 @@ export async function postBotComment(
     commentId: recorded.commentId,
   };
 }
+
+/**
+ * Posts a bot comment directly on a Pull Request (using GitHub issues comment API for PRs).
+ */
+export async function postBotCommentOnPr(
+  owner: string,
+  repoName: string,
+  prNumber: number,
+  kind: string,
+  body: string,
+  memberId: string | null = null,
+  deps: PostBotCommentDeps = {}
+): Promise<PostBotCommentResult> {
+  const client = deps.githubClient ?? getOrCreateGitHubClient();
+  let githubCommentId = BigInt(Date.now());
+
+  if (client) {
+    try {
+      const ghRes = await client.createIssueComment(
+        owner,
+        repoName,
+        prNumber,
+        body
+      );
+      githubCommentId = BigInt(ghRes.id);
+    } catch (err) {
+      console.error(`[postBotCommentOnPr] Error posting comment to PR #${prNumber} in ${owner}/${repoName}:`, err);
+    }
+  }
+
+  return {
+    posted: true,
+    commentId: githubCommentId,
+  };
+}
+

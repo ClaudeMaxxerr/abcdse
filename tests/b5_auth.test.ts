@@ -1514,6 +1514,45 @@ describe("CSRF protection", () => {
     });
     expect([400, 403]).toContain(res.statusCode);
   });
+
+  it("allows pre-existing session without _csrf cookie to recover by fetching /auth/csrf and mutating successfully", async () => {
+    // 1. Session created without _csrf cookie (like legacy session)
+    const rawToken = await createSession(db, memberId, "127.0.0.1", "ua");
+    const sessionOnlyCookie = `${SESSION_COOKIE_NAME}=${app.signCookie(rawToken)}`;
+
+    // 2. Fetch /auth/csrf
+    const csrfRes = await app.inject({
+      method: "GET",
+      url: "/auth/csrf",
+      headers: { cookie: sessionOnlyCookie },
+    });
+    expect(csrfRes.statusCode).toBe(200);
+    const csrfData = JSON.parse(csrfRes.body);
+    expect(csrfData.csrfToken).toBeTruthy();
+
+    const setCookies = csrfRes.headers["set-cookie"];
+    const csrfCookieHeader = Array.isArray(setCookies) ? setCookies.join("; ") : (setCookies || "");
+    expect(csrfCookieHeader).toContain("_csrf");
+
+    // Extract the signed _csrf cookie value
+    const combinedCookie = `${sessionOnlyCookie}; ${csrfCookieHeader}`;
+
+    // 3. Perform mutating request with the issued CSRF token
+    const patchRes = await app.inject({
+      method: "PATCH",
+      url: "/api/dashboard/profile",
+      headers: {
+        cookie: combinedCookie,
+        "content-type": "application/json",
+        "x-csrf-token": csrfData.csrfToken,
+      },
+      body: JSON.stringify({ department: "technical", team: "NEXUS" }),
+    });
+
+    expect(patchRes.statusCode).toBe(200);
+    const patchData = JSON.parse(patchRes.body);
+    expect(patchData.member.department).toBe("technical");
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

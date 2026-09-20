@@ -118,6 +118,58 @@ function makeMockDb() {
       }),
     },
 
+    $transaction: vi.fn(async (fn: any) => fn({
+      member: {
+        findUnique: vi.fn(async ({ where }: any) => members.get(where.id) ?? null),
+        findFirst: vi.fn(async ({ where }: any) => {
+          for (const m of members.values()) {
+            if (where?.githubLogin && m.githubLogin.toLowerCase() === (where.githubLogin.equals || where.githubLogin).toLowerCase()) return m;
+          }
+          return null;
+        }),
+      },
+      claim: {
+        findFirst: vi.fn(async ({ where }: any) => {
+          for (const c of claims.values()) {
+            if (where?.issueId && c.issueId !== where.issueId) continue;
+            if (where?.memberId && c.memberId !== where.memberId) continue;
+            return c;
+          }
+          return null;
+        }),
+        update: vi.fn(async ({ where, data }: any) => {
+          const c = claims.get(where.id);
+          if (!c) throw new Error("Claim not found");
+          const updated = { ...c, ...data };
+          claims.set(where.id, updated);
+          return updated;
+        }),
+      },
+      pullRequest: {
+        findFirst: vi.fn(async ({ where }: any) => {
+          for (const pr of pullRequests.values()) {
+            if (where?.repoId && pr.repoId !== where.repoId) continue;
+            if (where?.number && pr.number !== where.number) continue;
+            return pr;
+          }
+          return null;
+        }),
+        create: vi.fn(async ({ data }: any) => {
+          const id = `pr-${pullRequests.size + 1}`;
+          const pr = { id, ...data };
+          pullRequests.set(id, pr);
+          return pr;
+        }),
+        update: vi.fn(async ({ where, data }: any) => {
+          const pr = pullRequests.get(where.id);
+          if (!pr) throw new Error("PR not found");
+          const updated = { ...pr, ...data };
+          pullRequests.set(where.id, updated);
+          return updated;
+        }),
+      },
+    })),
+
     member: {
       findMany: vi.fn(async ({ select, orderBy, where }: any) => {
         let rows = Array.from(members.values());
@@ -145,6 +197,15 @@ function makeMockDb() {
           return { ...m, pullRequests: m.pullRequests ?? [] };
         }
         return m;
+      }),
+      findFirst: vi.fn(async ({ where }: any) => {
+        for (const m of members.values()) {
+          if (where?.githubLogin) {
+            const val = where.githubLogin.equals || where.githubLogin;
+            if (m.githubLogin.toLowerCase() === val.toLowerCase()) return m;
+          }
+        }
+        return null;
       }),
       update: vi.fn(async ({ where, data }: any) => {
         const m = members.get(where.id);
@@ -179,6 +240,14 @@ function makeMockDb() {
           issue: issues.get(c.issueId) ?? null,
         };
       }),
+      findFirst: vi.fn(async ({ where }: any) => {
+        for (const c of claims.values()) {
+          if (where?.issueId && c.issueId !== where.issueId) continue;
+          if (where?.memberId && c.memberId !== where.memberId) continue;
+          return c;
+        }
+        return null;
+      }),
       update: vi.fn(async ({ where, data }: any) => {
         const c = claims.get(where.id);
         if (!c) throw new Error("Claim not found");
@@ -194,6 +263,20 @@ function makeMockDb() {
         const pr = pullRequests.get(where.id) ?? null;
         if (!pr || !include) return pr;
         return { ...pr, member: members.get(pr.memberId) ?? null };
+      }),
+      findFirst: vi.fn(async ({ where }: any) => {
+        for (const pr of pullRequests.values()) {
+          if (where?.repoId && pr.repoId !== where.repoId) continue;
+          if (where?.number && pr.number !== where.number) continue;
+          return pr;
+        }
+        return null;
+      }),
+      create: vi.fn(async ({ data }: any) => {
+        const id = `pr-${pullRequests.size + 1}`;
+        const pr = { id, ...data };
+        pullRequests.set(id, pr);
+        return pr;
       }),
       update: vi.fn(async ({ where, data }: any) => {
         const pr = pullRequests.get(where.id);
@@ -216,6 +299,14 @@ function makeMockDb() {
         }));
       }),
       findUnique: vi.fn(async ({ where }: any) => issues.get(where.id) ?? null),
+      findFirst: vi.fn(async ({ where }: any) => {
+        for (const i of issues.values()) {
+          if (where?.repoId && i.repoId !== where.repoId) continue;
+          if (where?.number && i.number !== where.number) continue;
+          return i;
+        }
+        return null;
+      }),
       update: vi.fn(async ({ where, data }: any) => {
         const issue = issues.get(where.id);
         if (!issue) throw new Error("Issue not found");
@@ -273,7 +364,15 @@ function makeMockDb() {
 
     repo: {
       findMany: vi.fn(async () => []),
-      findFirst: vi.fn(async () => null),
+      findFirst: vi.fn(async ({ where }: any) => {
+        for (const r of repos.values()) {
+          if (where?.name) {
+            const val = where.name.equals || where.name;
+            if (r.name.toLowerCase() === val.toLowerCase()) return r;
+          }
+        }
+        return null;
+      }),
     },
 
     waitlistEntry: {
@@ -1081,3 +1180,93 @@ describe("Admin Bot Control", () => {
     expect(body.comments[0].commentId).toBe("555"); // BigInt serialised to string
   });
 });
+
+describe("Admin Manual PR Link — POST /api/admin/prs/link", () => {
+  it("manually links a PR to an issue/claim, updates claim to pr_raised and writes audit log", async () => {
+    const db = makeMockDb();
+    addAdminSessionForRawToken(db);
+
+    const memberId = "mem-roboticol";
+    db._members.set(memberId, {
+      id: memberId,
+      githubUserId: BigInt(99123),
+      githubLogin: "Roboticol",
+      displayName: "Roboticol",
+      department: Department.technical,
+      team: Team.NEXUS,
+      tier: Tier.tech,
+      isAdmin: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const repoId = "repo-campus";
+    db._repos.set(repoId, {
+      id: repoId,
+      owner: "AARVAK-VSET",
+      name: "campus-flow",
+      githubRepoId: BigInt(10),
+    });
+
+    const issueId = "issue-19";
+    db._issues.set(issueId, {
+      id: issueId,
+      repoId,
+      number: 19,
+      title: "Flow bug",
+      level: IssueLevel.medium,
+      spots: 1,
+      githubIssueId: BigInt(1900),
+    });
+
+    const claimId = "claim-19";
+    db._claims.set(claimId, {
+      id: claimId,
+      memberId,
+      issueId,
+      commentId: BigInt(123),
+      claimedAt: new Date(),
+      deadline: new Date(Date.now() + 3600_000),
+      status: ClaimStatus.active,
+      promotedAt: null,
+    });
+
+    const app = await buildApp({ prismaClient: db, disableLogging: true });
+    const res = await adminInject(app, "POST", "/api/admin/prs/link", {
+      repoOwner: "AARVAK-VSET",
+      repoName: "campus-flow",
+      prNumber: 27,
+      issueNumber: 19,
+      memberLogin: "Roboticol",
+      reason: "Recovery for missed webhook delivery",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.pullRequest.number).toBe(27);
+    expect(body.pullRequest.issueId).toBe(issueId);
+    expect(body.pullRequest.countsForScore).toBe(true);
+    expect(body.claim.status).toBe(ClaimStatus.pr_raised);
+
+    const claimInDb = db._claims.get(claimId);
+    expect(claimInDb.status).toBe(ClaimStatus.pr_raised);
+
+    expect(db._auditLogs.some((l: any) => l.action === "pr_manually_linked")).toBe(true);
+  });
+
+  it("returns 404 when repo or issue does not exist", async () => {
+    const db = makeMockDb();
+    addAdminSessionForRawToken(db);
+
+    const app = await buildApp({ prismaClient: db, disableLogging: true });
+    const res = await adminInject(app, "POST", "/api/admin/prs/link", {
+      repoOwner: "AARVAK-VSET",
+      repoName: "nonexistent-repo",
+      prNumber: 1,
+      issueNumber: 1,
+    });
+
+    expect(res.statusCode).toBe(404);
+  });
+});
+

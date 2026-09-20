@@ -4,7 +4,7 @@ import { config } from "../config.js";
 import { verifyWebhookSignature } from "./verify.js";
 import { processClaimComment, processUnclaimComment, parseClaimIntent } from "../domain/claimEngine.js";
 import { processPullRequestOpened, processPullRequestClosed } from "../domain/prEngine.js";
-import { postBotComment } from "../github/comments.js";
+import { postBotComment, postBotCommentOnPr } from "../github/comments.js";
 import { runOpportunisticSweep, runExpirySweep } from "../domain/expirySweep.js";
 
 export interface GitHubWebhookPayload {
@@ -311,9 +311,14 @@ export async function processWebhookEvent(
       await postBotComment(issueId, kind, body, memberId, { prismaClient: db });
     };
 
+    const postPrReply = async (owner: string, repo: string, prNumber: number, kind: string, body: string, memberId: string | null) => {
+      await postBotCommentOnPr(owner, repo, prNumber, kind, body, memberId, { prismaClient: db });
+    };
+
     if (action === "opened" || action === "reopened" || action === "edited") {
       await processPullRequestOpened(db, prCtx, repoCtx, {
         postReply,
+        postPrReply,
         finalDeadline: config.FINAL_DEADLINE,
       });
     } else if (action === "closed") {

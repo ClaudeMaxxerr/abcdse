@@ -250,6 +250,120 @@ describe("processPullRequestOpened", () => {
     expect(commentsPosted[0].kind).toBe("pr_unclaimed");
     expect(commentsPosted[0].body).toContain("Per § 2.7");
   });
+
+  it("comments on PR when opened with NO issue reference, guiding author to add Fixes #N", async () => {
+    const prCommentsPosted: any[] = [];
+    const mockDb = {
+      repo: {
+        findFirst: async () => ({ id: "repo-1", owner: "AARVAK-VSET", name: "aqua-sense" }),
+      },
+      member: {
+        findUnique: async () => mockMember,
+      },
+      claim: {
+        findMany: async () => [
+          {
+            id: "claim-1",
+            memberId: "mem-1",
+            status: ClaimStatus.active,
+            issue: { id: "issue-1", number: 7 },
+          },
+        ],
+      },
+    };
+
+    const postPrReply = async (owner: string, repo: string, prNumber: number, kind: string, body: string, memberId: string | null) => {
+      prCommentsPosted.push({ owner, repo, prNumber, kind, body, memberId });
+    };
+
+    const res = await processPullRequestOpened(
+      mockDb,
+      {
+        id: 5004,
+        number: 15,
+        title: "Initial draft implementation",
+        body: "WIP work here",
+        createdAt: "2026-09-19T10:00:00Z",
+        user: { id: 100, login: "alice" },
+      },
+      repoCtx,
+      { postPrReply }
+    );
+
+    expect(res.outcome).toBe("no_issue_referenced");
+    expect(res.countsForScore).toBe(false);
+    expect(prCommentsPosted).toHaveLength(1);
+    expect(prCommentsPosted[0].prNumber).toBe(15);
+    expect(prCommentsPosted[0].body).toContain("Fixes #7");
+  });
+
+  it("successfully links PR on 'edited' when author adds Fixes #N after initial open", async () => {
+    let claimStatus = ClaimStatus.active;
+    let recordedPr: any = null;
+    const commentsPosted: any[] = [];
+
+    const mockDb = {
+      repo: {
+        findFirst: async () => ({ id: "repo-1", owner: "AARVAK-VSET", name: "aqua-sense" }),
+      },
+      member: {
+        findUnique: async () => mockMember,
+      },
+      issue: {
+        findMany: async () => [
+          {
+            id: "issue-9",
+            number: 9,
+            claims: [{ id: "claim-9", memberId: "mem-1", status: claimStatus }],
+          },
+        ],
+      },
+      pullRequest: {
+        findFirst: async () => recordedPr,
+        create: async ({ data }: any) => {
+          recordedPr = { id: "pr-9", ...data };
+          return recordedPr;
+        },
+        update: async ({ data }: any) => {
+          recordedPr = { ...recordedPr, ...data };
+          return recordedPr;
+        },
+      },
+      claim: {
+        update: async ({ data }: any) => {
+          claimStatus = data.status;
+        },
+      },
+      $transaction: async (fn: any) => fn(mockDb),
+    };
+
+    const postReply = async (issueId: string, kind: string, body: string, memberId: string | null) => {
+      commentsPosted.push({ issueId, kind, body, memberId });
+    };
+
+    // Simulated "edited" event with title/body now containing "Fixes #9"
+    const res = await processPullRequestOpened(
+      mockDb,
+      {
+        id: 5009,
+        number: 27,
+        title: "Fixes #9 - Add feature",
+        body: "Completed implementation",
+        createdAt: "2026-09-19T10:00:00Z",
+        user: { id: 100, login: "alice" },
+      },
+      repoCtx,
+      { postReply }
+    );
+
+    expect(res.outcome).toBe("linked");
+    expect(res.countsForScore).toBe(true);
+    expect(claimStatus).toBe(ClaimStatus.pr_raised);
+    expect(recordedPr).toBeDefined();
+    expect(recordedPr.issueId).toBe("issue-9");
+    expect(recordedPr.countsForScore).toBe(true);
+    expect(commentsPosted[0].kind).toBe("pr_linked");
+  });
 });
 
 describe("processPullRequestClosed", () => {

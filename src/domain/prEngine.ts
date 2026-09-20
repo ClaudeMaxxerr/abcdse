@@ -7,7 +7,7 @@
 
 import { PrismaClient, ClaimStatus, IssueLevel } from "@prisma/client";
 import { config } from "../config.js";
-import { postBotComment } from "../github/comments.js";
+import { postBotComment, postBotCommentOnPr } from "../github/comments.js";
 
 export interface IssueReference {
   repoOwner?: string;
@@ -87,6 +87,7 @@ export function parseIssueReferences(title: string, body?: string | null): Issue
 
 export interface PREngineDeps {
   postReply?: (issueId: string, kind: string, body: string, memberId: string | null) => Promise<void>;
+  postPrReply?: (owner: string, repo: string, prNumber: number, kind: string, body: string, memberId: string | null) => Promise<void>;
   finalDeadline?: Date;
 }
 
@@ -103,6 +104,12 @@ export async function processPullRequestOpened(
     deps.postReply ??
     (async (issueId: string, kind: string, body: string, memberId: string | null) => {
       await postBotComment(issueId, kind, body, memberId, { prismaClient: db });
+    });
+
+  const postPrReply =
+    deps.postPrReply ??
+    (async (owner: string, repo: string, prNumber: number, kind: string, body: string, memberId: string | null) => {
+      await postBotCommentOnPr(owner, repo, prNumber, kind, body, memberId, { prismaClient: db });
     });
 
   // 1. Resolve Repo
@@ -138,10 +145,30 @@ export async function processPullRequestOpened(
   );
 
   if (repoRefs.length === 0) {
+    // Check if member holds active claim(s) on this repo to provide specific guidance
+    const memberClaims = await db.claim.findMany({
+      where: {
+        memberId: member.id,
+        status: ClaimStatus.active,
+        issue: { repoId: repo.id },
+      },
+      include: { issue: true },
+    });
+
+    let msg: string;
+    if (memberClaims.length > 0) {
+      const issueNums = memberClaims.map((c: any) => `#${c.issue.number}`).join(", ");
+      msg = `No issue reference found in this pull request. To link this PR to your claim and earn points, please edit the PR description or title to include \`Fixes #${memberClaims[0].issue.number}\` (or the issue you claimed: ${issueNums}).`;
+    } else {
+      msg = `No issue reference found in this pull request. To link this PR and earn points, please edit the PR description or title to include \`Fixes #<issue_number>\` matching your active claim.`;
+    }
+
+    await postPrReply(repoCtx.owner, repoCtx.name, prCtx.number, "pr_no_issue_reference", msg, member.id);
+
     return {
       outcome: "no_issue_referenced",
       countsForScore: false,
-      message: "No issue referenced in PR title or body.",
+      message: msg,
     };
   }
 

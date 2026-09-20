@@ -109,6 +109,17 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     },
   });
 
+  // Issue CSRF cookie on any request if missing, so existing sessions seamlessly obtain a CSRF secret
+  app.addHook("onRequest", async (request, reply) => {
+    if (!request.cookies._csrf) {
+      try {
+        reply.generateCsrf();
+      } catch {
+        // ignore if csrf not yet initialized
+      }
+    }
+  });
+
   // 4. Central Error Handler (Generic client messages, detailed server logs, no stack trace in response)
   app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {
     const statusCode =
