@@ -147,8 +147,9 @@ model PullRequest {
   repo           Repo      @relation(fields: [repoId], references: [id], onDelete: Cascade)
   openedAt       DateTime  @default(now())
   closedAt       DateTime?
-  merged         Boolean   @default(false)
-  countsForScore Boolean   @default(true)
+  merged              Boolean   @default(false)
+  countsForScore      Boolean   @default(true)
+  mergeDecisionLocked Boolean   @default(false)
 
   @@unique([repoId, number])
   @@index([memberId, countsForScore, merged])

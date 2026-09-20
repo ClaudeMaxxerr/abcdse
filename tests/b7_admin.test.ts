@@ -144,8 +144,28 @@ function makeMockDb() {
           claims.set(where.id, updated);
           return updated;
         }),
+        updateMany: vi.fn(async ({ where, data }: any) => {
+          let count = 0;
+          for (const [key, c] of claims.entries()) {
+            if (where?.issueId && c.issueId !== where.issueId) continue;
+            if (where?.memberId && c.memberId !== where.memberId) continue;
+            const updated = { ...c, ...data };
+            claims.set(key, updated);
+            count++;
+          }
+          return { count };
+        }),
       },
       pullRequest: {
+        findMany: vi.fn(async ({ where }: any) => {
+          let rows = Array.from(pullRequests.values());
+          if (where?.issueId) rows = rows.filter((r) => r.issueId === where.issueId);
+          if (where?.id?.not) rows = rows.filter((r) => r.id !== where.id.not);
+          return rows.map((r) => ({
+            ...r,
+            member: members.get(r.memberId) ?? null,
+          }));
+        }),
         findFirst: vi.fn(async ({ where }: any) => {
           for (const pr of pullRequests.values()) {
             if (where?.repoId && pr.repoId !== where.repoId) continue;
@@ -217,23 +237,19 @@ function makeMockDb() {
     },
 
     claim: {
-      findMany: vi.fn(async ({ where, take, skip, include, orderBy }: any) => {
+      findMany: vi.fn(async ({ where, include }: any) => {
         let rows = Array.from(claims.values());
-        if (where?.status) rows = rows.filter((c) => c.status === where.status);
-        if (skip) rows = rows.slice(skip);
-        if (take) rows = rows.slice(0, take);
-        if (include) {
-          rows = rows.map((c) => ({
-            ...c,
-            member: members.get(c.memberId) ?? null,
-            issue: issues.get(c.issueId) ?? null,
-          }));
-        }
-        return rows;
+        if (where?.memberId) rows = rows.filter((c) => c.memberId === where.memberId);
+        if (where?.status?.in) rows = rows.filter((c) => where.status.in.includes(c.status));
+        return rows.map((c) => ({
+          ...c,
+          member: members.get(c.memberId) ?? null,
+          issue: issues.get(c.issueId) ?? null,
+        }));
       }),
       findUnique: vi.fn(async ({ where, include }: any) => {
         const c = claims.get(where.id) ?? null;
-        if (!c || !include) return c;
+        if (!c) return null;
         return {
           ...c,
           member: members.get(c.memberId) ?? null,
@@ -255,14 +271,34 @@ function makeMockDb() {
         claims.set(where.id, updated);
         return updated;
       }),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        let count = 0;
+        for (const [key, c] of claims.entries()) {
+          if (where?.issueId && c.issueId !== where.issueId) continue;
+          if (where?.memberId && c.memberId !== where.memberId) continue;
+          const updated = { ...c, ...data };
+          claims.set(key, updated);
+          count++;
+        }
+        return { count };
+      }),
     },
 
     pullRequest: {
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn(async ({ where }: any) => {
+        let rows = Array.from(pullRequests.values());
+        if (where?.issueId) rows = rows.filter((r) => r.issueId === where.issueId);
+        return rows;
+      }),
       findUnique: vi.fn(async ({ where, include }: any) => {
         const pr = pullRequests.get(where.id) ?? null;
-        if (!pr || !include) return pr;
-        return { ...pr, member: members.get(pr.memberId) ?? null };
+        if (!pr) return null;
+        return {
+          ...pr,
+          issue: issues.get(pr.issueId) ?? { id: pr.issueId, number: 21 },
+          repo: repos.get(pr.repoId) ?? { owner: "AARVAK-VSET", name: "test-repo" },
+          member: members.get(pr.memberId) ?? null,
+        };
       }),
       findFirst: vi.fn(async ({ where }: any) => {
         for (const pr of pullRequests.values()) {
@@ -1269,4 +1305,94 @@ describe("Admin Manual PR Link — POST /api/admin/prs/link", () => {
     expect(res.statusCode).toBe(404);
   });
 });
+
+describe("Admin PRs — POST /api/admin/prs/:id/merge-decision (lock both sides and audit)", () => {
+  it("locks target PR to merged=true and competing PR to merged=false, updating claims and writing audits", async () => {
+    const db = makeMockDb();
+    addAdminSessionForRawToken(db);
+
+    const issueId = "issue-21";
+    const repoId = "repo-1";
+
+    db._issues.set(issueId, { id: issueId, number: 21, repoId });
+    db._repos.set(repoId, { id: repoId, owner: "AARVAK-VSET", name: "aqua-sense" });
+
+    // Seed competing PR 30 (author mem-1)
+    db._pullRequests.set("pr-30", {
+      id: "pr-30",
+      repoId,
+      number: 30,
+      githubPrId: BigInt(3000),
+      memberId: "mem-1",
+      issueId,
+      openedAt: new Date(),
+      merged: true,
+      countsForScore: true,
+      mergeDecisionLocked: false,
+    });
+    db._claims.set("claim-30", {
+      id: "claim-30",
+      issueId,
+      memberId: "mem-1",
+      status: ClaimStatus.merged,
+    });
+
+    // Seed target PR 24 (author mem-2)
+    db._pullRequests.set("pr-24", {
+      id: "pr-24",
+      repoId,
+      number: 24,
+      githubPrId: BigInt(2400),
+      memberId: "mem-2",
+      issueId,
+      openedAt: new Date(),
+      merged: false,
+      countsForScore: true,
+      mergeDecisionLocked: false,
+    });
+    db._claims.set("claim-24", {
+      id: "claim-24",
+      issueId,
+      memberId: "mem-2",
+      status: ClaimStatus.pr_raised,
+    });
+
+    const app = await buildApp({ prismaClient: db, disableLogging: true });
+
+    // Admin sets PR 24 to merged=true with reason
+    const res = await adminInject(app, "POST", "/api/admin/prs/pr-24/merge-decision", {
+      merged: true,
+      countsForScore: true,
+      reason: "Organiser decision: PR 24 quality wins",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.pullRequest.merged).toBe(true);
+    expect(body.pullRequest.mergeDecisionLocked).toBe(true);
+    expect(body.competingUpdated).toHaveLength(1);
+    expect(body.competingUpdated[0].id).toBe("pr-30");
+    expect(body.competingUpdated[0].merged).toBe(false);
+    expect(body.competingUpdated[0].mergeDecisionLocked).toBe(true);
+
+    // Verify DB state
+    const updatedPr24 = db._pullRequests.get("pr-24");
+    const updatedPr30 = db._pullRequests.get("pr-30");
+    expect(updatedPr24.merged).toBe(true);
+    expect(updatedPr24.mergeDecisionLocked).toBe(true);
+    expect(updatedPr30.merged).toBe(false);
+    expect(updatedPr30.mergeDecisionLocked).toBe(true);
+
+    // Verify Claims
+    const claim24 = db._claims.get("claim-24");
+    const claim30 = db._claims.get("claim-30");
+    expect(claim24.status).toBe(ClaimStatus.merged);
+    expect(claim30.status).toBe(ClaimStatus.pr_raised);
+
+    // Verify Audit Logs
+    expect(db._auditLogs.some((l: any) => l.action === "pr_merge_decision" && l.targetId === "pr-24")).toBe(true);
+    expect(db._auditLogs.some((l: any) => l.action === "pr_merge_decision_demoted" && l.targetId === "pr-30")).toBe(true);
+  });
+});
+
 

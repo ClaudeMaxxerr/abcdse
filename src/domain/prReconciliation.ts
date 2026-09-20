@@ -186,100 +186,132 @@ export async function reconcileMergeState(
 
     const mergedPrsOnGh = prInfoList.filter((p: any) => p.isMergedOnGitHub);
 
-    if (mergedPrsOnGh.length > 0) {
-      // Find the PR with the EARLIEST merge timestamp
-      const sortedMerged = [...mergedPrsOnGh].sort((a: any, b: any) => {
-        const tA = a.closedAt ? new Date(a.closedAt).getTime() : 0;
-        const tB = b.closedAt ? new Date(b.closedAt).getTime() : 0;
-        return tA - tB;
-      });
-
-      const firstMerged = sortedMerged[0]!;
-
-      for (const item of prInfoList) {
-        const pr = item.pr;
-        const shouldBeMerged = pr.id === firstMerged.pr.id;
-        const closedAtDate = item.closedAt ?? pr.closedAt ?? new Date();
-
-        let countsForScore = pr.countsForScore;
-        if (finalDeadline && closedAtDate > finalDeadline) {
-          countsForScore = false;
-        }
-
-        const wasMerged = pr.merged;
-        const hadCounts = pr.countsForScore;
-
-        if (
-          wasMerged !== shouldBeMerged ||
-          hadCounts !== countsForScore ||
-          (pr.closedAt && closedAtDate && pr.closedAt.toISOString() !== closedAtDate.toISOString()) ||
-          (!pr.closedAt && closedAtDate)
-        ) {
-          await db.pullRequest.update({
-            where: { id: pr.id },
-            data: {
-              merged: shouldBeMerged,
-              closedAt: closedAtDate,
-              countsForScore,
-            },
-          });
-
-          result.updatedCount++;
-          result.changedRows.push({
-            repo: `${pr.repo.owner}/${pr.repo.name}`,
-            prNumber: pr.number,
-            issueNumber: issue.number,
-            author: pr.member.githubLogin,
-            action: "merge_status_corrected",
-            before: {
-              merged: wasMerged,
-              countsForScore: hadCounts,
-            },
-            after: {
-              merged: shouldBeMerged,
-              countsForScore,
-            },
-          });
-        }
-
-        // Update corresponding claim status
-        if (shouldBeMerged && countsForScore) {
-          await db.claim.updateMany({
-            where: {
-              issueId: issue.id,
-              memberId: pr.memberId,
-            },
-            data: {
-              status: ClaimStatus.merged,
-            },
-          });
-        } else if (countsForScore) {
-          const memberClaim = issue.claims.find((c: any) => c.memberId === pr.memberId);
-          if (memberClaim && memberClaim.status === ClaimStatus.active) {
-            await db.claim.update({
-              where: { id: memberClaim.id },
-              data: {
-                status: ClaimStatus.pr_raised,
-              },
+    // Rule 2 & 4: If multiple PRs are merged on GitHub for the same issue
+    if (mergedPrsOnGh.length > 1) {
+      const hasLocked = prInfoList.some((p: any) => p.pr.mergeDecisionLocked);
+      if (hasLocked) {
+        // A row is locked by organiser decision:
+        // Must NEVER change merged or countsForScore on locked row, and must never demote competing PRs.
+        for (const item of prInfoList) {
+          const pr = item.pr;
+          const closedAtDate = item.closedAt ?? pr.closedAt;
+          if (!pr.closedAt && closedAtDate) {
+            await db.pullRequest.update({
+              where: { id: pr.id },
+              data: { closedAt: closedAtDate },
             });
           }
         }
+        continue;
       }
-    } else {
-      // None merged on GitHub: correct reverse case if DB had merged=true
+
+      // Neither is locked: do NOT pick a winner by timestamp.
+      // Leave existing DB state unchanged and log an admin-visible warning.
+      console.warn(
+        `[reconcileMergeState] CONFLICT: Multiple PRs merged on GitHub for issue #${issue.number} (${issue.repo.owner}/${issue.repo.name}) without locked organiser decision: ${mergedPrsOnGh
+          .map((p: any) => `PR #${p.pr.number} by ${p.pr.member.githubLogin}`)
+          .join(", ")}. Leaving DB state unchanged pending organiser decision.`
+      );
+
       for (const item of prInfoList) {
         const pr = item.pr;
-        if (pr.merged) {
+        const closedAtDate = item.closedAt ?? pr.closedAt;
+        if (!pr.closedAt && closedAtDate) {
           await db.pullRequest.update({
             where: { id: pr.id },
+            data: { closedAt: closedAtDate },
+          });
+        }
+      }
+      continue;
+    }
+
+    if (mergedPrsOnGh.length === 1) {
+      const mergedItem = mergedPrsOnGh[0]!;
+      const mergedPr = mergedItem.pr;
+
+      // If the merged PR is locked, respect it and do not demote others
+      if (mergedPr.mergeDecisionLocked) {
+        if (!mergedPr.closedAt && mergedItem.closedAt) {
+          await db.pullRequest.update({
+            where: { id: mergedPr.id },
+            data: { closedAt: mergedItem.closedAt },
+          });
+        }
+        continue;
+      }
+
+      // If any other PR on the issue is locked, do not modify or demote
+      const anyLocked = prInfoList.some((p: any) => p.pr.mergeDecisionLocked);
+      if (anyLocked) {
+        continue;
+      }
+
+      const closedAtDate = mergedItem.closedAt ?? mergedPr.closedAt ?? new Date();
+      let countsForScore = mergedPr.countsForScore;
+      if (finalDeadline && closedAtDate > finalDeadline) {
+        countsForScore = false;
+      }
+
+      const wasMerged = mergedPr.merged;
+      const hadCounts = mergedPr.countsForScore;
+
+      if (!mergedPr.merged || mergedPr.countsForScore !== countsForScore || (!mergedPr.closedAt && closedAtDate)) {
+        await db.pullRequest.update({
+          where: { id: mergedPr.id },
+          data: {
+            merged: true,
+            closedAt: closedAtDate,
+            countsForScore,
+          },
+        });
+
+        result.updatedCount++;
+        result.changedRows.push({
+          repo: `${mergedPr.repo.owner}/${mergedPr.repo.name}`,
+          prNumber: mergedPr.number,
+          issueNumber: issue.number,
+          author: mergedPr.member.githubLogin,
+          action: "merge_status_corrected",
+          before: {
+            merged: wasMerged,
+            countsForScore: hadCounts,
+          },
+          after: {
+            merged: true,
+            countsForScore,
+          },
+        });
+      }
+
+      // Update corresponding claim status
+      if (countsForScore) {
+        await db.claim.updateMany({
+          where: {
+            issueId: issue.id,
+            memberId: mergedPr.memberId,
+          },
+          data: {
+            status: ClaimStatus.merged,
+          },
+        });
+      }
+
+      // Demote competing unlocked PRs on the same issue
+      for (const otherItem of prInfoList) {
+        const otherPr = otherItem.pr;
+        if (otherPr.id === mergedPr.id || otherPr.mergeDecisionLocked) continue;
+
+        if (otherPr.merged) {
+          await db.pullRequest.update({
+            where: { id: otherPr.id },
             data: { merged: false },
           });
 
-          // Demote claim from merged to pr_raised if needed
           await db.claim.updateMany({
             where: {
               issueId: issue.id,
-              memberId: pr.memberId,
+              memberId: otherPr.memberId,
               status: ClaimStatus.merged,
             },
             data: {
@@ -289,15 +321,52 @@ export async function reconcileMergeState(
 
           result.updatedCount++;
           result.changedRows.push({
-            repo: `${pr.repo.owner}/${pr.repo.name}`,
-            prNumber: pr.number,
+            repo: `${otherPr.repo.owner}/${otherPr.repo.name}`,
+            prNumber: otherPr.number,
             issueNumber: issue.number,
-            author: pr.member.githubLogin,
+            author: otherPr.member.githubLogin,
             action: "merge_status_corrected",
             before: { merged: true },
             after: { merged: false },
           });
         }
+      }
+      continue;
+    }
+
+    // None merged on GitHub: correct reverse case if DB had merged=true and row is not locked
+    for (const item of prInfoList) {
+      const pr = item.pr;
+      if (pr.mergeDecisionLocked) continue;
+
+      if (pr.merged) {
+        await db.pullRequest.update({
+          where: { id: pr.id },
+          data: { merged: false },
+        });
+
+        // Demote claim from merged to pr_raised if needed
+        await db.claim.updateMany({
+          where: {
+            issueId: issue.id,
+            memberId: pr.memberId,
+            status: ClaimStatus.merged,
+          },
+          data: {
+            status: ClaimStatus.pr_raised,
+          },
+        });
+
+        result.updatedCount++;
+        result.changedRows.push({
+          repo: `${pr.repo.owner}/${pr.repo.name}`,
+          prNumber: pr.number,
+          issueNumber: issue.number,
+          author: pr.member.githubLogin,
+          action: "merge_status_corrected",
+          before: { merged: true },
+          after: { merged: false },
+        });
       }
     }
   }

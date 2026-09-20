@@ -767,6 +767,194 @@ export const adminRoutes: FastifyPluginAsync<AdminRoutesOptions> = async (app, o
   );
 
   // =========================================================================
+  // PULL REQUESTS
+  // =========================================================================
+
+  /**
+   * POST /api/admin/prs/:id/merge-decision
+   * Explicit organiser merge decision on a PR.
+   * Body: { merged: boolean, countsForScore?: boolean, reason?: string }
+   * Sets merged, countsForScore, and mergeDecisionLocked = true.
+   * Updates linked Claim status (merged -> merged, otherwise pr_raised).
+   * If merged = true, demotes and locks any competing PR on the same issue.
+   * Writes AuditLog with before/after snapshots.
+   */
+  app.post<{
+    Params: { id: string };
+    Body: unknown;
+  }>("/prs/:id/merge-decision", async (request, reply) => {
+    const session = (request as any).session;
+    const { id } = request.params;
+
+    const schema = z.object({
+      merged: z.boolean(),
+      countsForScore: z.boolean().optional(),
+      reason: z.string().optional().default("Organiser merge decision"),
+    });
+
+    const parsed = schema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        statusCode: 400,
+        error: "Bad Request",
+        message: parsed.error.issues.map((i) => i.message).join("; "),
+      });
+    }
+
+    const { merged, reason } = parsed.data;
+
+    // 1. Find target PR
+    const pr = await db.pullRequest.findUnique({
+      where: { id },
+      include: {
+        issue: true,
+        repo: true,
+        member: true,
+      },
+    });
+
+    if (!pr) {
+      return reply.status(404).send({
+        statusCode: 404,
+        error: "Not Found",
+        message: `PullRequest with id ${id} not found`,
+      });
+    }
+
+    const countsForScore = parsed.data.countsForScore ?? pr.countsForScore;
+
+    const beforeSnapshot = {
+      merged: pr.merged,
+      countsForScore: pr.countsForScore,
+      mergeDecisionLocked: pr.mergeDecisionLocked,
+    };
+
+    let updatedPr: any;
+    const competingPrsUpdated: any[] = [];
+
+    await db.$transaction(async (tx: any) => {
+      // If setting this PR to merged, demote and lock any competing PRs on the same issue
+      if (merged) {
+        const competing = await tx.pullRequest.findMany({
+          where: {
+            issueId: pr.issueId,
+            id: { not: pr.id },
+          },
+          include: { member: true },
+        });
+
+        for (const otherPr of competing) {
+          const otherBefore = {
+            merged: otherPr.merged,
+            countsForScore: otherPr.countsForScore,
+            mergeDecisionLocked: otherPr.mergeDecisionLocked,
+          };
+
+          const otherUpdated = await tx.pullRequest.update({
+            where: { id: otherPr.id },
+            data: {
+              merged: false,
+              mergeDecisionLocked: true,
+            },
+          });
+
+          // Demote competing claim to pr_raised
+          await tx.claim.updateMany({
+            where: {
+              issueId: pr.issueId,
+              memberId: otherPr.memberId,
+            },
+            data: {
+              status: ClaimStatus.pr_raised,
+            },
+          });
+
+          competingPrsUpdated.push({
+            pr: otherUpdated,
+            before: otherBefore,
+          });
+        }
+      }
+
+      // Update target PR
+      updatedPr = await tx.pullRequest.update({
+        where: { id: pr.id },
+        data: {
+          merged,
+          countsForScore,
+          mergeDecisionLocked: true,
+        },
+      });
+
+      // Update target member's claim status
+      const targetClaimStatus = (merged && countsForScore) ? ClaimStatus.merged : ClaimStatus.pr_raised;
+      await tx.claim.updateMany({
+        where: {
+          issueId: pr.issueId,
+          memberId: pr.memberId,
+        },
+        data: {
+          status: targetClaimStatus,
+        },
+      });
+    });
+
+    // Write audit log for competing PRs
+    for (const comp of competingPrsUpdated) {
+      await writeAudit(
+        db,
+        session?.memberId ?? null,
+        request.ip,
+        "pr_merge_decision_demoted",
+        "PullRequest",
+        comp.pr.id,
+        comp.before,
+        {
+          merged: comp.pr.merged,
+          countsForScore: comp.pr.countsForScore,
+          mergeDecisionLocked: comp.pr.mergeDecisionLocked,
+          reason: `Demoted because PR #${pr.number} awarded merge on issue #${pr.issue.number}`,
+        }
+      );
+    }
+
+    // Write audit log for target PR
+    await writeAudit(
+      db,
+      session?.memberId ?? null,
+      request.ip,
+      "pr_merge_decision",
+      "PullRequest",
+      pr.id,
+      beforeSnapshot,
+      {
+        merged: updatedPr.merged,
+        countsForScore: updatedPr.countsForScore,
+        mergeDecisionLocked: updatedPr.mergeDecisionLocked,
+        reason,
+      }
+    );
+
+    return reply.status(200).send({
+      statusCode: 200,
+      message: "Merge decision applied and locked",
+      pullRequest: {
+        id: updatedPr.id,
+        number: updatedPr.number,
+        merged: updatedPr.merged,
+        countsForScore: updatedPr.countsForScore,
+        mergeDecisionLocked: updatedPr.mergeDecisionLocked,
+      },
+      competingUpdated: competingPrsUpdated.map((c) => ({
+        id: c.pr.id,
+        number: c.pr.number,
+        merged: c.pr.merged,
+        mergeDecisionLocked: c.pr.mergeDecisionLocked,
+      })),
+    });
+  });
+
+  // =========================================================================
   // ISSUES
   // =========================================================================
 

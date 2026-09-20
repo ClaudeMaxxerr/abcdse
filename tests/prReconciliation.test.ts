@@ -171,14 +171,15 @@ describe("runPrReconciliation", () => {
     expect(claimStatus).toBe(ClaimStatus.merged);
   });
 
-  it("reconciles multi-PR issue by awarding merged status to earliest merged PR and demoting later ones", async () => {
+  it("two unlocked merged PRs on one issue produce a warning rather than an automatic winner", async () => {
     let pr30 = {
       id: "pr-30",
       repoId: "repo-aqua",
       number: 30,
       githubPrId: BigInt(4584585902),
       countsForScore: true,
-      merged: false, // mistakenly false
+      merged: false,
+      mergeDecisionLocked: false,
       closedAt: new Date("2026-09-20T15:59:52Z"),
       issueId: "issue-21",
       memberId: "mem-1",
@@ -192,7 +193,126 @@ describe("runPrReconciliation", () => {
       number: 24,
       githubPrId: BigInt(4582528723),
       countsForScore: true,
-      merged: true, // mistakenly true
+      merged: true,
+      mergeDecisionLocked: false,
+      closedAt: new Date("2026-09-20T16:21:02Z"),
+      issueId: "issue-21",
+      memberId: "mem-2",
+      repo: { id: "repo-aqua", owner: "AARVAK-VSET", name: "aqua-sense" },
+      member: mockMember2,
+    };
+
+    let claim30Status = ClaimStatus.pr_raised;
+    let claim24Status = ClaimStatus.merged;
+
+    const mockDb = {
+      repo: {
+        findMany: async () => [{ id: "repo-aqua", owner: "AARVAK-VSET", name: "aqua-sense" }],
+      },
+      pullRequest: {
+        findFirst: async ({ where }: any) => {
+          if (where.number === 30) return pr30;
+          if (where.number === 24) return pr24;
+          return null;
+        },
+        update: async ({ where, data }: any) => {
+          if (where.id === "pr-30") pr30 = { ...pr30, ...data };
+          if (where.id === "pr-24") pr24 = { ...pr24, ...data };
+        },
+      },
+      issue: {
+        findMany: async () => [
+          {
+            id: "issue-21",
+            number: 21,
+            repo: { owner: "AARVAK-VSET", name: "aqua-sense" },
+            pullRequests: [pr30, pr24],
+            claims: [
+              { id: "claim-30", memberId: "mem-1", status: claim30Status },
+              { id: "claim-24", memberId: "mem-2", status: claim24Status },
+            ],
+          },
+        ],
+      },
+      claim: {
+        updateMany: async ({ where, data }: any) => {
+          if (where.memberId === "mem-1") claim30Status = data.status;
+          if (where.memberId === "mem-2") claim24Status = data.status;
+        },
+      },
+    };
+
+    const mockGithubClient = {
+      listPullRequests: async () => [
+        {
+          id: 4584585902,
+          number: 30,
+          title: "Telemetry sync",
+          body: "Fixes #21",
+          state: "closed",
+          merged_at: "2026-09-20T15:59:52Z",
+          closed_at: "2026-09-20T15:59:52Z",
+          created_at: "2026-09-20T15:03:35Z",
+          user: { id: 100, login: "alice" },
+        },
+        {
+          id: 4582528723,
+          number: 24,
+          title: "Telemetry fix",
+          body: "Fixes #21",
+          state: "closed",
+          merged_at: "2026-09-20T16:21:02Z",
+          closed_at: "2026-09-20T16:21:02Z",
+          created_at: "2026-09-20T05:31:07Z",
+          user: { id: 200, login: "bob" },
+        },
+      ],
+    } as any;
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await runPrReconciliation(mockDb, {
+      githubClient: mockGithubClient,
+    });
+
+    // Does NOT pick a winner by timestamp: leaves existing DB state untouched
+    expect(result.updatedMergeCount).toBe(0);
+    expect(pr30.merged).toBe(false);
+    expect(pr24.merged).toBe(true);
+    expect(claim30Status).toBe(ClaimStatus.pr_raised);
+    expect(claim24Status).toBe(ClaimStatus.merged);
+
+    // Warning is logged for organiser
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("CONFLICT: Multiple PRs merged on GitHub for issue #21")
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("a locked row survives reconciliation unchanged", async () => {
+    let pr30 = {
+      id: "pr-30",
+      repoId: "repo-aqua",
+      number: 30,
+      githubPrId: BigInt(4584585902),
+      countsForScore: true,
+      merged: false,
+      mergeDecisionLocked: true, // locked by organiser
+      closedAt: new Date("2026-09-20T15:59:52Z"),
+      issueId: "issue-21",
+      memberId: "mem-1",
+      repo: { id: "repo-aqua", owner: "AARVAK-VSET", name: "aqua-sense" },
+      member: mockMember,
+    };
+
+    let pr24 = {
+      id: "pr-24",
+      repoId: "repo-aqua",
+      number: 24,
+      githubPrId: BigInt(4582528723),
+      countsForScore: true,
+      merged: true,
+      mergeDecisionLocked: true, // locked by organiser
       closedAt: new Date("2026-09-20T16:21:02Z"),
       issueId: "issue-21",
       memberId: "mem-2",
@@ -271,10 +391,13 @@ describe("runPrReconciliation", () => {
       githubClient: mockGithubClient,
     });
 
-    expect(result.updatedMergeCount).toBe(2);
-    expect(pr30.merged).toBe(true);
-    expect(pr24.merged).toBe(false);
-    expect(claim30Status).toBe(ClaimStatus.merged);
+    expect(result.updatedMergeCount).toBe(0);
+    expect(pr30.merged).toBe(false);
+    expect(pr30.mergeDecisionLocked).toBe(true);
+    expect(pr24.merged).toBe(true);
+    expect(pr24.mergeDecisionLocked).toBe(true);
+    expect(claim30Status).toBe(ClaimStatus.pr_raised);
+    expect(claim24Status).toBe(ClaimStatus.merged);
 
     // Running reconciliation a second time changes nothing
     const secondResult = await runPrReconciliation(mockDb, {
