@@ -138,6 +138,17 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
       },
     });
 
+    // Hard claim usage (lifetime count of accepted Hard claims: active, pr_raised, merged)
+    const hardClaimsCount = await db.claim.count({
+      where: {
+        memberId,
+        status: { in: [...COMMITTED_CLAIM_STATUSES] },
+        issue: {
+          level: "hard",
+        },
+      },
+    });
+
     // 6. Active waitlist entries
     const waitlistEntries = await db.waitlistEntry.findMany({
       where: {
@@ -161,6 +172,8 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
 
     const isTech = member.tier === "tech";
     const easyRemaining = isTech ? 0 : Math.max(0, 3 - easyClaimsCount);
+    const hardRemaining = isTech ? null : Math.max(0, 2 - hardClaimsCount);
+    const maxHardClaims = isTech ? null : 2;
     const freeActiveSlots = Math.max(0, 2 - activeClaims.length);
     const capReached = score.raw >= score.tierCap;
     const canEditProfile = Boolean(committedClaimsCount === 0 && prsCount === 0);
@@ -194,6 +207,9 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
         easyClaimsCount,
         maxEasyClaims: 3,
         easyRemaining,
+        hardClaimsCount,
+        maxHardClaims,
+        hardRemaining,
         isTech,
         techCannotClaimEasy: isTech,
         committedClaimsCount,

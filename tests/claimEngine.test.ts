@@ -83,6 +83,7 @@ interface MockDBOpts {
   member?: ReturnType<typeof makeMember> | null;
   activeClaims?: number;
   easyClaimsCount?: number;
+  hardClaimsCount?: number;
   committedClaimsCount?: number;
   pullRequests?: Array<{
     id?: string;
@@ -103,6 +104,7 @@ function buildMockDb(opts: MockDBOpts = {}) {
     member = makeMember(),
     activeClaims = 0,
     easyClaimsCount = 0,
+    hardClaimsCount = 0,
     committedClaimsCount,
     pullRequests = [],
     expiredClaimOnIssue = false,
@@ -123,9 +125,12 @@ function buildMockDb(opts: MockDBOpts = {}) {
       findMany: vi.fn().mockResolvedValue(pullRequests),
     },
     claim: {
-      count: vi.fn().mockImplementation(async ({ where }: { where?: { status?: unknown; issue?: unknown } }) => {
-        // Distinguish active claims count from easy claims count by checking 'issue' key
-        if (where && "issue" in where) return easyClaimsCount;
+      count: vi.fn().mockImplementation(async ({ where }: { where?: { status?: unknown; issue?: { level?: IssueLevel } } }) => {
+        // Distinguish active claims count from easy/hard claims count by checking 'issue' key
+        if (where && "issue" in where) {
+          if (where.issue?.level === IssueLevel.hard) return hardClaimsCount;
+          return easyClaimsCount;
+        }
         const statusIn = (where?.status as { in?: ClaimStatus[] })?.in;
         if (statusIn && (statusIn.includes(ClaimStatus.pr_raised) || statusIn.includes(ClaimStatus.merged))) {
           return committedClaimsCount !== undefined ? committedClaimsCount : pullRequests.length + activeClaims;
@@ -825,5 +830,99 @@ describe("Mid-event rule: Tier cap potential claim-eligibility check", () => {
     const result = await processClaimComment(db, makeComment(), ISSUE_CTX, { postReply });
     expect(result.outcome).toBe("easy_limit");
     expect(postedComments.some((c) => c.kind === "claim_easy_limit")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mid-event rule: Hard issue limit for General tier (max 2 lifetime Hard claims)
+// ---------------------------------------------------------------------------
+
+describe("Mid-event rule: Hard issue limit for General tier (max 2 Hard claims)", () => {
+  it("allows a general member with 1 Hard claim to claim another Hard issue", async () => {
+    const { db, postReply } = buildMockDb({
+      issue: { id: "issue-hard-10", spots: 2, level: IssueLevel.hard },
+      member: makeMember({ id: "gen-1", tier: Tier.general, department: Department.pr }),
+      hardClaimsCount: 1, // 1 previous Hard claim < 2 limit
+      activeClaims: 0,
+      committedClaimsCount: 1,
+    });
+
+    const result = await processClaimComment(db, makeComment(), ISSUE_CTX, { postReply });
+    expect(result.outcome).toBe("accepted");
+    expect((result as { deadline: Date }).deadline).toBeInstanceOf(Date);
+  });
+
+  it("rejects a general member with 2 Hard claims when claiming a 3rd Hard issue", async () => {
+    const { db, postedComments, postReply } = buildMockDb({
+      issue: { id: "issue-hard-11", spots: 2, level: IssueLevel.hard },
+      member: makeMember({ id: "gen-2", tier: Tier.general, department: Department.pr }),
+      hardClaimsCount: 2, // already at 2 Hard claims limit
+      activeClaims: 0,
+      committedClaimsCount: 2,
+    });
+
+    const result = await processClaimComment(db, makeComment(), ISSUE_CTX, { postReply });
+    expect(result.outcome).toBe("hard_limit");
+    const msg = (result as { message: string }).message;
+    expect(msg).toContain("General members may claim at most 2 Hard issues. You already have 2. Medium issues are still open to you — 3 Easy plus 4 Medium reaches the 80-point cap.");
+    expect(postedComments.some((c) => c.kind === "claim_hard_limit")).toBe(true);
+    expect(postedComments[0]!.body).toContain("General members may claim at most 2 Hard issues. You already have 2. Medium issues are still open to you — 3 Easy plus 4 Medium reaches the 80-point cap.");
+  });
+
+  it("does NOT reject a tech member with 4 Hard claims by this rule (unrestricted on Hard)", async () => {
+    // Tech member with 4 Hard claims, not blocked by cap rule because no PRs / low points
+    const { db, postReply } = buildMockDb({
+      issue: { id: "issue-hard-12", spots: 2, level: IssueLevel.hard },
+      member: makeMember({ id: "tech-99", tier: Tier.tech, department: Department.technical }),
+      hardClaimsCount: 4, // Tech members are unrestricted on Hard claims
+      activeClaims: 0,
+      committedClaimsCount: 4,
+    });
+
+    const result = await processClaimComment(db, makeComment(), ISSUE_CTX, { postReply });
+    expect(result.outcome).toBe("accepted");
+  });
+
+  it("fires Easy limit, 2-active limit, and potential-cap rule independently", async () => {
+    // 1. Easy limit still fires for Easy issue
+    const { db: easyDb, postReply: easyReply } = buildMockDb({
+      issue: { id: "issue-easy-50", spots: 1, level: IssueLevel.easy },
+      member: makeMember({ id: "gen-x", tier: Tier.general }),
+      easyClaimsCount: 3,
+      hardClaimsCount: 0,
+      activeClaims: 0,
+      committedClaimsCount: 3,
+    });
+    const easyRes = await processClaimComment(easyDb, makeComment(), ISSUE_CTX, { postReply: easyReply });
+    expect(easyRes.outcome).toBe("easy_limit");
+
+    // 2. 2-active limit still fires on Medium issue
+    const { db: activeDb, postReply: activeReply } = buildMockDb({
+      issue: { id: "issue-med-50", spots: 2, level: IssueLevel.medium },
+      member: makeMember({ id: "gen-y", tier: Tier.general }),
+      hardClaimsCount: 1,
+      activeClaims: 2,
+      committedClaimsCount: 2,
+    });
+    const activeRes = await processClaimComment(activeDb, makeComment(), ISSUE_CTX, { postReply: activeReply });
+    expect(activeRes.outcome).toBe("active_claims_limit");
+
+    // 3. Potential cap rule fires on Medium issue when cap is reached
+    const pullRequests = [
+      { id: "pr-1", number: 1, countsForScore: true, openedAt: "2026-09-19T08:00:00Z", issue: { level: IssueLevel.hard } },
+      { id: "pr-2", number: 2, countsForScore: true, openedAt: "2026-09-19T09:00:00Z", issue: { level: IssueLevel.hard } },
+      { id: "pr-3", number: 3, countsForScore: true, openedAt: "2026-09-19T10:00:00Z", issue: { level: IssueLevel.hard } },
+      { id: "pr-4", number: 4, countsForScore: true, openedAt: "2026-09-19T11:00:00Z", issue: { level: IssueLevel.hard } },
+    ]; // 80 potential points for general member (cap reached with 4 Hard PRs)
+    const { db: capDb, postReply: capReply } = buildMockDb({
+      issue: { id: "issue-med-51", spots: 2, level: IssueLevel.medium },
+      member: makeMember({ id: "gen-z", tier: Tier.general }),
+      pullRequests,
+      hardClaimsCount: 2,
+      activeClaims: 1,
+      committedClaimsCount: 5, // 4 + 1 = 5 threshold reached
+    });
+    const capRes = await processClaimComment(capDb, makeComment(), ISSUE_CTX, { postReply: capReply });
+    expect(capRes.outcome).toBe("tier_cap_covered");
   });
 });

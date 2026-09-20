@@ -2,7 +2,7 @@ import React from "react";
 import { Info, AlertTriangle, ShieldCheck, Flame } from "lucide-react";
 
 interface RuleNoticeProps {
-  type: "tech-easy-ban" | "easy-cap" | "active-claims" | "same-team" | "no-edits" | "expiry-ban" | "cap-eligibility" | "general-info";
+  type: "tech-easy-ban" | "easy-cap" | "general-hard-cap" | "active-claims" | "same-team" | "no-edits" | "expiry-ban" | "cap-eligibility" | "general-info";
   customText?: string;
 }
 
@@ -24,6 +24,25 @@ export const RuleNotice: React.FC<RuleNoticeProps> = ({ type, customText }) => {
           <ShieldCheck size={15} style={{ flexShrink: 0, marginTop: "2px", color: "#c084fc" }} />
           <div>
             <strong>Tier Cap Claim Guard:</strong> You cannot claim new issues once your existing PRs cover your tier cap. A +1 claim buffer is allowed to protect against single review rejections.
+          </div>
+        </div>
+      );
+    case "general-hard-cap":
+      return (
+        <div style={{
+          padding: "0.6rem 0.85rem",
+          borderRadius: "8px",
+          background: "rgba(251, 146, 60, 0.1)",
+          border: "1px solid rgba(251, 146, 60, 0.3)",
+          color: "#fed7aa",
+          fontSize: "0.8rem",
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "0.5rem",
+        }}>
+          <Info size={15} style={{ flexShrink: 0, marginTop: "2px", color: "#fb923c" }} />
+          <div>
+            <strong>Hard Cap (2 Max):</strong> General tier participants may claim a lifetime maximum of 2 Hard issues. Medium issues remain open (3 Easy + 4 Medium reaches the 80-pt cap).
           </div>
         </div>
       );

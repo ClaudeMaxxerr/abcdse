@@ -172,6 +172,16 @@ export const MemberDashboard: React.FC<{ user: UserAuth | null; initialData?: Da
               </div>
             </div>
 
+            {/* Hard claimed for General tier */}
+            {!limits.isTech && (
+              <div style={{ padding: "0.5rem 0.85rem", background: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}>
+                <div style={{ fontSize: "0.7rem", color: "#94a3b8", textTransform: "uppercase" }}>Hard Claimed</div>
+                <div style={{ fontSize: "1rem", fontWeight: 800, color: (limits.hardClaimsCount ?? 0) >= 2 ? "#f43f5e" : "#38bdf8", fontFamily: "var(--font-mono)" }}>
+                  {limits.hardClaimsCount ?? 0} / 2
+                </div>
+              </div>
+            )}
+
             {/* PR stats */}
             <div style={{ padding: "0.5rem 0.85rem", background: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}>
               <div style={{ fontSize: "0.7rem", color: "#94a3b8", textTransform: "uppercase" }}>Merged PRs</div>
@@ -323,6 +333,7 @@ export const MemberDashboard: React.FC<{ user: UserAuth | null; initialData?: Da
       {/* Proactive Rule Alerts */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "0.75rem", marginBottom: "1.5rem" }}>
         {limits.isTech ? <RuleNotice type="tech-easy-ban" /> : <RuleNotice type="easy-cap" />}
+        {!limits.isTech && <RuleNotice type="general-hard-cap" />}
         <RuleNotice type="cap-eligibility" />
         <RuleNotice type="active-claims" />
         <RuleNotice type="no-edits" />

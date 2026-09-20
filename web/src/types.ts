@@ -131,6 +131,9 @@ export interface DashboardData {
     easyClaimsCount: number;
     maxEasyClaims: number;
     easyRemaining: number;
+    hardClaimsCount?: number;
+    maxHardClaims?: number | null;
+    hardRemaining?: number | null;
     isTech: boolean;
     techCannotClaimEasy: boolean;
     committedClaimsCount?: number;

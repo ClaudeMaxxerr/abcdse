@@ -72,6 +72,7 @@ export type ClaimEngineResult =
   | { outcome: "not_registered"; message: string }
   | { outcome: "tier_forbidden"; message: string }
   | { outcome: "easy_limit"; message: string }
+  | { outcome: "hard_limit"; message: string }
   | { outcome: "active_claims_limit"; message: string }
   | { outcome: "tier_cap_covered"; message: string }
   | { outcome: "previously_expired"; message: string }
@@ -185,6 +186,7 @@ export async function processClaimComment(
     | { outcome: "not_registered"; message: string; issueDbId: string }
     | { outcome: "tier_forbidden"; message: string; issueDbId: string; memberId: string }
     | { outcome: "easy_limit"; message: string; issueDbId: string; memberId: string }
+    | { outcome: "hard_limit"; message: string; issueDbId: string; memberId: string }
     | { outcome: "active_claims_limit"; message: string; issueDbId: string; memberId: string }
     | { outcome: "tier_cap_covered"; message: string; issueDbId: string; memberId: string }
     | { outcome: "previously_expired"; message: string; issueDbId: string; memberId: string }
@@ -251,6 +253,24 @@ export async function processClaimComment(
             `You have already used all 3 of your allowed Easy issue claims. ` +
             `You may only claim Medium or Hard issues now.`;
           return { outcome: "easy_limit", message: msg, issueDbId: dbIssue.id, memberId: member.id };
+        }
+      }
+
+      // ── Step 4b: Hard limit for General tier (general: max 2, tech: unrestricted) ──
+      if (member.tier === Tier.general && level === IssueLevel.hard) {
+        const hardCount = await tx.claim.count({
+          where: {
+            memberId: member.id,
+            status: { in: [...COMMITTED_CLAIM_STATUSES] },
+            issue: { level: IssueLevel.hard },
+          },
+        });
+        if (hardCount >= 2) {
+          const msg =
+            `❌ **Hard issue limit reached.** ` +
+            `General members may claim at most 2 Hard issues. You already have 2. ` +
+            `Medium issues are still open to you — 3 Easy plus 4 Medium reaches the 80-point cap.`;
+          return { outcome: "hard_limit", message: msg, issueDbId: dbIssue.id, memberId: member.id };
         }
       }
 
@@ -410,6 +430,7 @@ export async function processClaimComment(
     const kindMap: Record<string, string> = {
       active_claims_limit: "claim_active_limit",
       tier_cap_covered: "claim_tier_cap_covered",
+      hard_limit: "claim_hard_limit",
     };
     const kind = kindMap[txRes.outcome] || `claim_${txRes.outcome}`;
     const memberId = "memberId" in txRes ? txRes.memberId : null;
