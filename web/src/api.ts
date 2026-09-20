@@ -121,3 +121,15 @@ export async function updateMemberProfile(department: string, team: string): Pro
   }
   return data;
 }
+
+export async function fetchTeamDetail(team: string): Promise<import("./types.js").TeamDetailResponse> {
+  const res = await fetch(`${API_BASE}/api/teams/${encodeURIComponent(team)}/detail`, {
+    headers: { Accept: "application/json" },
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.message || `Failed to load team details: ${res.statusText}`);
+  }
+  return await res.json();
+}

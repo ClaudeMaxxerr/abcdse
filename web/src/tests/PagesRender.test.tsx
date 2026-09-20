@@ -233,7 +233,7 @@ describe("Public & Authenticated Pages Comprehensive Rendering", () => {
   };
 
   it("renders Team Leaderboard with rank, scores, and expandable member breakdown", () => {
-    render(<TeamLeaderboard initialData={mockTeamData} />);
+    render(<TeamLeaderboard initialData={mockTeamData} isEventOver={true} />);
 
     expect(screen.getByText("Team Leaderboard")).toBeInTheDocument();
     expect(screen.getByText("Team Nexus")).toBeInTheDocument();

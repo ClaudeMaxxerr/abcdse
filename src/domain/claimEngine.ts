@@ -25,6 +25,11 @@ import {
   COMMITTED_CLAIM_STATUSES,
   OCCUPIED_SPOT_CLAIM_STATUSES,
 } from "./claimConstants.js";
+import {
+  getTierCap,
+  computePotentialPoints,
+  computeClaimsNeededToReachCap,
+} from "./scoring.js";
 
 export {
   ACTIVE_CLAIM_STATUSES,
@@ -68,6 +73,7 @@ export type ClaimEngineResult =
   | { outcome: "tier_forbidden"; message: string }
   | { outcome: "easy_limit"; message: string }
   | { outcome: "active_claims_limit"; message: string }
+  | { outcome: "tier_cap_covered"; message: string }
   | { outcome: "previously_expired"; message: string }
   | { outcome: "same_team"; message: string }
   | { outcome: "accepted"; message: string; deadline: Date }
@@ -180,6 +186,7 @@ export async function processClaimComment(
     | { outcome: "tier_forbidden"; message: string; issueDbId: string; memberId: string }
     | { outcome: "easy_limit"; message: string; issueDbId: string; memberId: string }
     | { outcome: "active_claims_limit"; message: string; issueDbId: string; memberId: string }
+    | { outcome: "tier_cap_covered"; message: string; issueDbId: string; memberId: string }
     | { outcome: "previously_expired"; message: string; issueDbId: string; memberId: string }
     | { outcome: "same_team"; message: string; issueDbId: string; memberId: string }
     | { outcome: "accepted"; message: string; deadline: Date; issueDbId: string; memberId: string }
@@ -262,7 +269,43 @@ export async function processClaimComment(
         return { outcome: "active_claims_limit", message: msg, issueDbId: dbIssue.id, memberId: member.id };
       }
 
-      // ── Step 6: Previously-expired-on-this-issue rejection ──────────────
+      // ── Step 6: Tier cap potential claim-eligibility check ───────────────
+      // Mid-event rule: Block a new claim when potentialPoints >= tierCap AND
+      // the member already holds (claimsNeededToReachCap + 1) claims in active/pr_raised/merged.
+      const tierCap = getTierCap(member.tier);
+      const pullRequests = await tx.pullRequest.findMany({
+        where: {
+          memberId: member.id,
+          countsForScore: true,
+        },
+        include: {
+          issue: {
+            select: { level: true },
+          },
+        },
+        orderBy: { openedAt: "asc" },
+      });
+
+      const potentialPoints = computePotentialPoints(pullRequests);
+      if (potentialPoints >= tierCap) {
+        const claimsNeededToReachCap = computeClaimsNeededToReachCap(pullRequests, tierCap);
+        const committedClaimsCount = await tx.claim.count({
+          where: {
+            memberId: member.id,
+            status: { in: [...COMMITTED_CLAIM_STATUSES] },
+          },
+        });
+
+        if (committedClaimsCount >= claimsNeededToReachCap + 1) {
+          const msg =
+            `❌ **Tier cap reached.** ` +
+            `Your existing pull requests already cover your ${tierCap}-point cap. You cannot claim more issues. ` +
+            `Focus on the ones you have — quality decides which PRs are merged.`;
+          return { outcome: "tier_cap_covered", message: msg, issueDbId: dbIssue.id, memberId: member.id };
+        }
+      }
+
+      // ── Step 7: Previously-expired-on-this-issue rejection ──────────────
       const expiredClaim = await tx.claim.findFirst({
         where: {
           memberId: member.id,
@@ -366,6 +409,7 @@ export async function processClaimComment(
   if ("issueDbId" in txRes) {
     const kindMap: Record<string, string> = {
       active_claims_limit: "claim_active_limit",
+      tier_cap_covered: "claim_tier_cap_covered",
     };
     const kind = kindMap[txRes.outcome] || `claim_${txRes.outcome}`;
     const memberId = "memberId" in txRes ? txRes.memberId : null;

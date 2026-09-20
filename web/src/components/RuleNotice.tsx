@@ -2,12 +2,31 @@ import React from "react";
 import { Info, AlertTriangle, ShieldCheck, Flame } from "lucide-react";
 
 interface RuleNoticeProps {
-  type: "tech-easy-ban" | "easy-cap" | "active-claims" | "same-team" | "no-edits" | "expiry-ban" | "general-info";
+  type: "tech-easy-ban" | "easy-cap" | "active-claims" | "same-team" | "no-edits" | "expiry-ban" | "cap-eligibility" | "general-info";
   customText?: string;
 }
 
 export const RuleNotice: React.FC<RuleNoticeProps> = ({ type, customText }) => {
   switch (type) {
+    case "cap-eligibility":
+      return (
+        <div style={{
+          padding: "0.6rem 0.85rem",
+          borderRadius: "8px",
+          background: "rgba(168, 85, 247, 0.1)",
+          border: "1px solid rgba(168, 85, 247, 0.3)",
+          color: "#e9d5ff",
+          fontSize: "0.8rem",
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "0.5rem",
+        }}>
+          <ShieldCheck size={15} style={{ flexShrink: 0, marginTop: "2px", color: "#c084fc" }} />
+          <div>
+            <strong>Tier Cap Claim Guard:</strong> You cannot claim new issues once your existing PRs cover your tier cap. A +1 claim buffer is allowed to protect against single review rejections.
+          </div>
+        </div>
+      );
     case "tech-easy-ban":
       return (
         <div style={{

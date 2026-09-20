@@ -179,6 +179,14 @@ export const MemberDashboard: React.FC<{ user: UserAuth | null; initialData?: Da
                 {scoring.mergedPrs} of {scoring.totalPrs}
               </div>
             </div>
+
+            {/* Potential Points */}
+            <div style={{ padding: "0.5rem 0.85rem", background: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}>
+              <div style={{ fontSize: "0.7rem", color: "#94a3b8", textTransform: "uppercase" }}>Potential Points</div>
+              <div style={{ fontSize: "1rem", fontWeight: 800, color: (scoring.potentialPoints ?? scoring.raw) >= scoring.tierCap ? "#c084fc" : "#38bdf8", fontFamily: "var(--font-mono)" }}>
+                {scoring.potentialPoints ?? scoring.raw} / {scoring.tierCap}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -262,9 +270,60 @@ export const MemberDashboard: React.FC<{ user: UserAuth | null; initialData?: Da
         </div>
       </div>
 
+      {/* Tier Cap Covered - Claiming Blocked Alert */}
+      {limits.isClaimBlockedByCap && (
+        <div style={{
+          marginBottom: "1.5rem",
+          padding: "1rem 1.25rem",
+          background: "rgba(244, 63, 94, 0.15)",
+          border: "1px solid rgba(244, 63, 94, 0.4)",
+          borderRadius: "8px",
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "0.75rem",
+          color: "#fda4af",
+        }}>
+          <Shield size={20} style={{ flexShrink: 0, marginTop: "2px", color: "#f43f5e" }} />
+          <div>
+            <div style={{ fontWeight: 800, fontSize: "0.95rem", color: "#f8fafc", marginBottom: "0.25rem" }}>
+              Claiming Blocked — Tier Cap Covered
+            </div>
+            <div style={{ fontSize: "0.85rem" }}>
+              {limits.capCoveredBlockedReason || `Your existing pull requests already cover your ${scoring.tierCap}-point cap. You cannot claim more issues. Focus on the ones you have — quality decides which PRs are merged.`}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Near Cap Potential Notice */}
+      {!limits.isClaimBlockedByCap && (scoring.potentialPoints ?? 0) >= scoring.tierCap && (
+        <div style={{
+          marginBottom: "1.5rem",
+          padding: "0.85rem 1.25rem",
+          background: "rgba(168, 85, 247, 0.12)",
+          border: "1px solid rgba(168, 85, 247, 0.35)",
+          borderRadius: "8px",
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "0.75rem",
+          color: "#e9d5ff",
+        }}>
+          <Shield size={18} style={{ flexShrink: 0, marginTop: "2px", color: "#c084fc" }} />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: "0.9rem", color: "#f8fafc", marginBottom: "0.2rem" }}>
+              Cap Covered ({scoring.potentialPoints} Potential Pts)
+            </div>
+            <div style={{ fontSize: "0.8rem" }}>
+              Your existing pull requests can reach the {scoring.tierCap}-point cap. You currently hold {limits.committedClaimsCount ?? 0} claims (max allowed: {limits.maxClaimsAllowed ?? 0}). Once you reach {limits.maxClaimsAllowed ?? 0} claims, new claims will be blocked. Focus on PR review quality!
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Proactive Rule Alerts */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "0.75rem", marginBottom: "1.5rem" }}>
         {limits.isTech ? <RuleNotice type="tech-easy-ban" /> : <RuleNotice type="easy-cap" />}
+        <RuleNotice type="cap-eligibility" />
         <RuleNotice type="active-claims" />
         <RuleNotice type="no-edits" />
       </div>

@@ -3,9 +3,13 @@ import { TeamScore, MemberScore } from "../types.js";
 import { fetchTeamLeaderboard } from "../api.js";
 import { Trophy, RefreshCw, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
 
-export const TeamLeaderboard: React.FC<{ initialData?: TeamScore[] }> = ({ initialData }) => {
+export const TeamLeaderboard: React.FC<{
+  initialData?: TeamScore[];
+  isEventOver?: boolean;
+  onSelectTeam?: (team: string) => void;
+}> = ({ initialData, isEventOver: initialIsEventOver, onSelectTeam }) => {
   const [teams, setTeams] = useState<TeamScore[]>(initialData || []);
-  const [isEventOver, setIsEventOver] = useState<boolean>(false);
+  const [isEventOver, setIsEventOver] = useState<boolean>(initialIsEventOver || false);
   const [loading, setLoading] = useState(!initialData);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
@@ -262,13 +266,28 @@ export const TeamLeaderboard: React.FC<{ initialData?: TeamScore[] }> = ({ initi
                     {isExpanded && t.members && t.members.length > 0 && (
                       <tr style={{ background: "rgba(15, 23, 42, 0.95)" }}>
                         <td colSpan={8} style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid #334155" }}>
-                          <div style={{ marginBottom: "0.75rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <h4 style={{ fontSize: "0.85rem", fontWeight: 700, color: "#38bdf8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                              {t.teamName} — Member Breakdown ({t.members.length} participants)
-                            </h4>
-                            <span style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
-                              Tier Cap: 60 pts (Tech) • 80 pts (General)
-                            </span>
+                          <div style={{ marginBottom: "0.75rem", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
+                            <div>
+                              <h4 style={{ fontSize: "0.85rem", fontWeight: 700, color: "#38bdf8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                {t.teamName} — Member Breakdown ({t.members.length} participants)
+                              </h4>
+                              <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
+                                Tier Cap: 60 pts (Tech) • 80 pts (General)
+                              </div>
+                            </div>
+                            <a
+                              href={`/teams/${t.team}`}
+                              onClick={(e) => {
+                                if (onSelectTeam) {
+                                  e.preventDefault();
+                                  onSelectTeam(t.team);
+                                }
+                              }}
+                              className="btn btn-secondary"
+                              style={{ fontSize: "0.75rem", padding: "0.25rem 0.65rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
+                            >
+                              <span>View Team Detail Hub &amp; Live Activity &rarr;</span>
+                            </a>
                           </div>
 
                           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "0.75rem" }}>

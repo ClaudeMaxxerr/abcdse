@@ -10,7 +10,7 @@ import { FastifyPluginAsync } from "fastify";
 import { prisma } from "../db.js";
 import { resolveSession } from "../auth/session.js";
 import { readSessionToken } from "../auth/requestHelpers.js";
-import { getMemberScore } from "../domain/scoring.js";
+import { getMemberScore, computeClaimsNeededToReachCap, computePotentialPoints } from "../domain/scoring.js";
 import { Department, Team, ClaimStatus } from "@prisma/client";
 import { z } from "zod";
 import { deriveTier, detectForbiddenFields } from "./registration.js";
@@ -112,6 +112,21 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
       where: { memberId },
     });
 
+    // Member PRs for potential points and claimsNeededToReachCap
+    const memberPrs = await db.pullRequest.findMany({
+      where: { memberId, countsForScore: true },
+      include: { issue: { select: { level: true } } },
+      orderBy: { openedAt: "asc" },
+    });
+
+    const potentialPoints = score.potentialPoints ?? computePotentialPoints(memberPrs);
+    const claimsNeededToReachCap = computeClaimsNeededToReachCap(memberPrs, score.tierCap);
+    const maxClaimsAllowed = potentialPoints >= score.tierCap ? claimsNeededToReachCap + 1 : null;
+    const isClaimBlockedByCap = Boolean(potentialPoints >= score.tierCap && committedClaimsCount >= (claimsNeededToReachCap + 1));
+    const capCoveredBlockedReason = isClaimBlockedByCap
+      ? `Your existing pull requests already cover your ${score.tierCap}-point cap. You cannot claim more issues. Focus on the ones you have — quality decides which PRs are merged.`
+      : null;
+
     // 5. Easy claim usage (lifetime count of accepted Easy claims: active, pr_raised, merged)
     const easyClaimsCount = await db.claim.count({
       where: {
@@ -166,6 +181,7 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
         raw: score.raw,
         capped: score.capped,
         tierCap: score.tierCap,
+        potentialPoints,
         capReached,
         totalPrs: score.totalPrs,
         mergedPrs: score.mergedPrs,
@@ -180,6 +196,11 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
         easyRemaining,
         isTech,
         techCannotClaimEasy: isTech,
+        committedClaimsCount,
+        claimsNeededToReachCap,
+        maxClaimsAllowed,
+        isClaimBlockedByCap,
+        capCoveredBlockedReason,
       },
       activeClaims: activeClaims.map((c) => ({
         id: c.id,

@@ -118,6 +118,7 @@ export interface DashboardData {
     raw: number;
     capped: number;
     tierCap: number;
+    potentialPoints?: number;
     capReached: boolean;
     totalPrs: number;
     mergedPrs: number;
@@ -132,6 +133,11 @@ export interface DashboardData {
     easyRemaining: number;
     isTech: boolean;
     techCannotClaimEasy: boolean;
+    committedClaimsCount?: number;
+    claimsNeededToReachCap?: number;
+    maxClaimsAllowed?: number | null;
+    isClaimBlockedByCap?: boolean;
+    capCoveredBlockedReason?: string | null;
   };
   activeClaims: Array<{
     id: string;
@@ -170,4 +176,65 @@ export interface DashboardData {
     createdAt: string;
     deadline: string;
   }>;
+}
+
+export interface TeamDetailMember {
+  member: {
+    id: string;
+    displayName: string;
+    githubLogin: string;
+    department: Department;
+    tier: Tier;
+    tierCap: number;
+    cap: number;
+  };
+  raw: number;
+  capped: number;
+  potentialPoints: number;
+  totalPrs: number;
+  mergedPrs: number;
+  activeClaims: Array<{
+    id: string;
+    issueId: string;
+    repo: string;
+    repoOwner: string;
+    repoName: string;
+    issueNumber: number;
+    issueTitle: string;
+    title: string;
+    level: Level;
+    claimedAt: string;
+    deadline: string;
+  }>;
+  prs: Array<{
+    id: string;
+    prNumber: number;
+    repo: string;
+    repoName: string;
+    issueNumber: number;
+    linkedIssueNumber: number;
+    issueTitle: string;
+    title: string;
+    level: Level;
+    points: number;
+    currentValue: number;
+    merged: boolean;
+    countsForScore: boolean;
+    openedAt: string;
+  }>;
+}
+
+export interface TeamDetailResponse {
+  statusCode: number;
+  team: Team;
+  teamName: string;
+  challengeTotal: number;
+  totalPrs: number;
+  mergedPrs: number;
+  rollup: {
+    activeClaims: { easy: number; medium: number; hard: number; total: number };
+    prs: { easy: number; medium: number; hard: number; total: number };
+    mergedPrs: { easy: number; medium: number; hard: number; total: number };
+  };
+  members: TeamDetailMember[];
 }

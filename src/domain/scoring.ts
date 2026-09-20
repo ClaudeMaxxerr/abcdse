@@ -29,6 +29,7 @@ export interface MemberScoreResult {
   raw: number;
   tierCap: number;
   capped: number;
+  potentialPoints?: number;
   totalPrs: number;
   mergedPrs: number;
   prBreakdown: PRScoringBreakdown[];
@@ -76,12 +77,71 @@ export function getPRPoints(level: IssueLevel, merged: boolean, countsForScore: 
 }
 
 /**
+ * Merged value of an issue level:
+ * Easy: 10 pts, Medium: 15 pts, Hard: 20 pts
+ */
+export function getMergedLevelPoints(level: IssueLevel): number {
+  switch (level) {
+    case IssueLevel.easy:
+      return 10;
+    case IssueLevel.medium:
+      return 15;
+    case IssueLevel.hard:
+      return 20;
+    default:
+      return 0;
+  }
+}
+
+/**
  * Tier cap per CONTEXT.md § 2.2:
  * Tech tier: 60 points max
  * General tier: 80 points max
  */
 export function getTierCap(tier: Tier): number {
   return tier === Tier.tech ? 60 : 80;
+}
+
+/**
+ * Calculates potential points: sum over all PRs of the MERGED value of the linked issue's level.
+ */
+export function computePotentialPoints(
+  pullRequests: Array<{ issue?: { level: IssueLevel } | null; countsForScore?: boolean }>
+): number {
+  return (pullRequests || [])
+    .filter((pr) => pr.countsForScore !== false)
+    .reduce((sum, pr) => {
+      const level = pr.issue?.level ?? IssueLevel.easy;
+      return sum + getMergedLevelPoints(level);
+    }, 0);
+}
+
+/**
+ * Computes how many PRs (in order of openedAt) are required to reach the tierCap.
+ */
+export function computeClaimsNeededToReachCap(
+  pullRequests: Array<{ issue?: { level: IssueLevel } | null; countsForScore?: boolean; openedAt?: Date | string }>,
+  tierCap: number
+): number {
+  const sorted = [...(pullRequests || [])]
+    .filter((pr) => pr.countsForScore !== false)
+    .sort((a, b) => {
+      const tA = a.openedAt ? new Date(a.openedAt).getTime() : 0;
+      const tB = b.openedAt ? new Date(b.openedAt).getTime() : 0;
+      return tA - tB;
+    });
+
+  let running = 0;
+  let count = 0;
+  for (const pr of sorted) {
+    const level = pr.issue?.level ?? IssueLevel.easy;
+    running += getMergedLevelPoints(level);
+    count += 1;
+    if (running >= tierCap) {
+      break;
+    }
+  }
+  return count;
 }
 
 /**
@@ -106,6 +166,7 @@ export function computeMemberScoreFromData(member: any): MemberScoreResult {
   const raw = prBreakdown.reduce((sum, item) => sum + item.points, 0);
   const tierCap = getTierCap(member.tier);
   const capped = Math.min(raw, tierCap);
+  const potentialPoints = computePotentialPoints(member.pullRequests || []);
 
   const totalPrs = (member.pullRequests || []).filter((pr: any) => pr.countsForScore).length;
   const mergedPrs = (member.pullRequests || []).filter((pr: any) => pr.countsForScore && pr.merged).length;
@@ -120,6 +181,7 @@ export function computeMemberScoreFromData(member: any): MemberScoreResult {
     raw,
     tierCap,
     capped,
+    potentialPoints,
     totalPrs,
     mergedPrs,
     prBreakdown,

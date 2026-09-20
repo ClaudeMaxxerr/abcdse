@@ -4,7 +4,7 @@ import { Countdown } from "../components/Countdown.js";
 
 describe("Countdown Component", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
   });
 
   afterEach(() => {

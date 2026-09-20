@@ -7,16 +7,22 @@ import { MemberLeaderboard } from "./pages/MemberLeaderboard.js";
 import { IssueBoard } from "./pages/IssueBoard.js";
 import { MemberDashboard } from "./pages/MemberDashboard.js";
 import { RegisterPage } from "./pages/RegisterPage.js";
+import { TeamDetailPage } from "./pages/TeamDetailPage.js";
 
 export function App() {
   const [activeTab, setActiveTab] = useState<"teams" | "members" | "issues" | "dashboard">("teams");
   const [user, setUser] = useState<UserAuth | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
 
   useEffect(() => {
     // Check current path or default
     const path = window.location.pathname;
-    if (path.includes("members")) setActiveTab("members");
+    const teamMatch = path.match(/^\/teams\/([A-Za-z0-9_-]+)/);
+    if (teamMatch) {
+      setSelectedTeam(teamMatch[1]);
+      setActiveTab("teams");
+    } else if (path.includes("members")) setActiveTab("members");
     else if (path.includes("issues")) setActiveTab("issues");
     else if (path.includes("dashboard")) setActiveTab("dashboard");
     else if (path.includes("register")) {
@@ -33,12 +39,19 @@ export function App() {
   const handleSelectTab = (tab: "teams" | "members" | "issues" | "dashboard") => {
     setActiveTab(tab);
     setIsRegistering(false);
+    setSelectedTeam(null);
     window.history.pushState({}, "", `/${tab === "teams" ? "" : tab}`);
+  };
+
+  const handleSelectTeam = (team: string) => {
+    setSelectedTeam(team);
+    window.history.pushState({}, "", `/teams/${team}`);
   };
 
   const handleLogout = async () => {
     await postLogout();
     setUser(null);
+    setSelectedTeam(null);
     setActiveTab("teams");
     window.history.pushState({}, "", "/");
   };
@@ -63,9 +76,18 @@ export function App() {
               });
             }}
           />
+        ) : selectedTeam ? (
+          <TeamDetailPage
+            team={selectedTeam}
+            user={user}
+            onBack={() => {
+              setSelectedTeam(null);
+              handleSelectTab("teams");
+            }}
+          />
         ) : (
           <>
-            {activeTab === "teams" && <TeamLeaderboard />}
+            {activeTab === "teams" && <TeamLeaderboard onSelectTeam={handleSelectTeam} />}
             {activeTab === "members" && <MemberLeaderboard />}
             {activeTab === "issues" && <IssueBoard user={user} />}
             {activeTab === "dashboard" && <MemberDashboard user={user} />}

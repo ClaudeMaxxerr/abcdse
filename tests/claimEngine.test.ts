@@ -83,6 +83,14 @@ interface MockDBOpts {
   member?: ReturnType<typeof makeMember> | null;
   activeClaims?: number;
   easyClaimsCount?: number;
+  committedClaimsCount?: number;
+  pullRequests?: Array<{
+    id?: string;
+    number?: number;
+    countsForScore?: boolean;
+    openedAt?: Date | string;
+    issue?: { level: IssueLevel };
+  }>;
   expiredClaimOnIssue?: boolean;
   occupiedClaims?: Array<{ id: string; memberId: string; member: { team: Team; id: string } }>;
   waitlistCount?: number;
@@ -95,6 +103,8 @@ function buildMockDb(opts: MockDBOpts = {}) {
     member = makeMember(),
     activeClaims = 0,
     easyClaimsCount = 0,
+    committedClaimsCount,
+    pullRequests = [],
     expiredClaimOnIssue = false,
     occupiedClaims = [],
     waitlistCount = 0,
@@ -109,10 +119,17 @@ function buildMockDb(opts: MockDBOpts = {}) {
     member: {
       findUnique: vi.fn().mockResolvedValue(member),
     },
+    pullRequest: {
+      findMany: vi.fn().mockResolvedValue(pullRequests),
+    },
     claim: {
-      count: vi.fn().mockImplementation(async ({ where }: { where: { status?: unknown; issue?: unknown } }) => {
+      count: vi.fn().mockImplementation(async ({ where }: { where?: { status?: unknown; issue?: unknown } }) => {
         // Distinguish active claims count from easy claims count by checking 'issue' key
         if (where && "issue" in where) return easyClaimsCount;
+        const statusIn = (where?.status as { in?: ClaimStatus[] })?.in;
+        if (statusIn && (statusIn.includes(ClaimStatus.pr_raised) || statusIn.includes(ClaimStatus.merged))) {
+          return committedClaimsCount !== undefined ? committedClaimsCount : pullRequests.length + activeClaims;
+        }
         return activeClaims;
       }),
       findFirst: vi.fn().mockImplementation(async ({ where }: { where: { status?: unknown } }) => {
@@ -678,5 +695,135 @@ describe("Bot comment de-duplication", () => {
     expect(r2.posted).toBe(false);
     expect(r2.reason).toContain("already posted");
     expect(recorded).toHaveLength(1); // no duplicate
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mid-event rule: Tier cap potential claim-eligibility check
+// ---------------------------------------------------------------------------
+
+describe("Mid-event rule: Tier cap potential claim-eligibility check", () => {
+  it("allows a tech member with 2 Hard PRs to claim (potential points 40 < 60 cap)", async () => {
+    const pullRequests = [
+      { id: "pr-1", number: 101, countsForScore: true, openedAt: "2026-09-19T08:00:00Z", issue: { level: IssueLevel.hard } },
+      { id: "pr-2", number: 102, countsForScore: true, openedAt: "2026-09-19T10:00:00Z", issue: { level: IssueLevel.hard } },
+    ];
+
+    const { db, postReply } = buildMockDb({
+      issue: { id: "issue-hard-1", spots: 2, level: IssueLevel.hard },
+      member: makeMember({ id: "tech-1", tier: Tier.tech, department: Department.technical }),
+      pullRequests,
+      activeClaims: 0,
+      committedClaimsCount: 2,
+    });
+
+    const result = await processClaimComment(db, makeComment(), ISSUE_CTX, { postReply });
+    expect(result.outcome).toBe("accepted");
+  });
+
+  it("allows a tech member with 3 Hard PRs and 3 claims to claim (buffer allows up to 4 claims)", async () => {
+    // 3 Hard PRs = 60 potential points (cap reached at 3 PRs).
+    // Buffer allows claimsNeededToReachCap + 1 = 3 + 1 = 4 claims.
+    // Holding 3 claims is below 4, so claim is accepted.
+    const pullRequests = [
+      { id: "pr-1", number: 101, countsForScore: true, openedAt: "2026-09-19T08:00:00Z", issue: { level: IssueLevel.hard } },
+      { id: "pr-2", number: 102, countsForScore: true, openedAt: "2026-09-19T10:00:00Z", issue: { level: IssueLevel.hard } },
+      { id: "pr-3", number: 103, countsForScore: true, openedAt: "2026-09-19T12:00:00Z", issue: { level: IssueLevel.hard } },
+    ];
+
+    const { db, postReply } = buildMockDb({
+      issue: { id: "issue-hard-2", spots: 2, level: IssueLevel.hard },
+      member: makeMember({ id: "tech-1", tier: Tier.tech, department: Department.technical }),
+      pullRequests,
+      activeClaims: 0,
+      committedClaimsCount: 3, // 3 claims held < 4 threshold
+    });
+
+    const result = await processClaimComment(db, makeComment(), ISSUE_CTX, { postReply });
+    expect(result.outcome).toBe("accepted");
+  });
+
+  it("rejects a tech member with 3 Hard PRs and 4 claims (buffer exhausted at 4 claims)", async () => {
+    // 3 Hard PRs = 60 potential points. claimsNeededToReachCap = 3.
+    // Threshold = 4 claims. Member already holds 4 claims.
+    const pullRequests = [
+      { id: "pr-1", number: 101, countsForScore: true, openedAt: "2026-09-19T08:00:00Z", issue: { level: IssueLevel.hard } },
+      { id: "pr-2", number: 102, countsForScore: true, openedAt: "2026-09-19T10:00:00Z", issue: { level: IssueLevel.hard } },
+      { id: "pr-3", number: 103, countsForScore: true, openedAt: "2026-09-19T12:00:00Z", issue: { level: IssueLevel.hard } },
+    ];
+
+    const { db, postedComments, postReply } = buildMockDb({
+      issue: { id: "issue-hard-3", spots: 2, level: IssueLevel.hard },
+      member: makeMember({ id: "tech-1", tier: Tier.tech, department: Department.technical }),
+      pullRequests,
+      activeClaims: 1,
+      committedClaimsCount: 4, // 4 claims held >= 4 threshold
+    });
+
+    const result = await processClaimComment(db, makeComment(), ISSUE_CTX, { postReply });
+    expect(result.outcome).toBe("tier_cap_covered");
+    const msg = (result as { message: string }).message;
+    expect(msg).toContain("Your existing pull requests already cover your 60-point cap. You cannot claim more issues. Focus on the ones you have — quality decides which PRs are merged.");
+    expect(postedComments.some((c) => c.kind === "claim_tier_cap_covered")).toBe(true);
+    expect(postedComments[0]!.body).toContain("Your existing pull requests already cover your 60-point cap. You cannot claim more issues. Focus on the ones you have — quality decides which PRs are merged.");
+  });
+
+  it("allows a general member with 3 Easy + 1 Medium PRs to still claim (potential points 45 < 80 cap)", async () => {
+    // 3 Easy PRs (3 * 10 = 30) + 1 Medium PR (15) = 45 potential points < 80 cap.
+    const pullRequests = [
+      { id: "pr-1", number: 201, countsForScore: true, openedAt: "2026-09-19T08:00:00Z", issue: { level: IssueLevel.easy } },
+      { id: "pr-2", number: 202, countsForScore: true, openedAt: "2026-09-19T09:00:00Z", issue: { level: IssueLevel.easy } },
+      { id: "pr-3", number: 203, countsForScore: true, openedAt: "2026-09-19T10:00:00Z", issue: { level: IssueLevel.easy } },
+      { id: "pr-4", number: 204, countsForScore: true, openedAt: "2026-09-19T11:00:00Z", issue: { level: IssueLevel.medium } },
+    ];
+
+    const { db, postReply } = buildMockDb({
+      issue: { id: "issue-med-10", spots: 2, level: IssueLevel.medium },
+      member: makeMember({ id: "gen-1", tier: Tier.general, department: Department.pr }),
+      pullRequests,
+      activeClaims: 0,
+      easyClaimsCount: 3,
+      committedClaimsCount: 4,
+    });
+
+    const result = await processClaimComment(db, makeComment(), ISSUE_CTX, { postReply });
+    expect(result.outcome).toBe("accepted");
+  });
+
+  it("fires 2-active-claims limit independently even if potential points are low", async () => {
+    const pullRequests = [
+      { id: "pr-1", number: 301, countsForScore: true, openedAt: "2026-09-19T08:00:00Z", issue: { level: IssueLevel.medium } },
+    ];
+
+    const { db, postedComments, postReply } = buildMockDb({
+      issue: { id: "issue-med-11", spots: 2, level: IssueLevel.medium },
+      member: makeMember({ id: "gen-2", tier: Tier.general, department: Department.pr }),
+      pullRequests,
+      activeClaims: 2, // 2 active claims already held
+      committedClaimsCount: 3,
+    });
+
+    const result = await processClaimComment(db, makeComment(), ISSUE_CTX, { postReply });
+    expect(result.outcome).toBe("active_claims_limit");
+    expect(postedComments.some((c) => c.kind === "claim_active_limit")).toBe(true);
+  });
+
+  it("fires 3-Easy lifetime limit independently even if potential points are low", async () => {
+    const pullRequests = [
+      { id: "pr-1", number: 401, countsForScore: true, openedAt: "2026-09-19T08:00:00Z", issue: { level: IssueLevel.easy } },
+    ];
+
+    const { db, postedComments, postReply } = buildMockDb({
+      issue: { id: "issue-easy-99", spots: 1, level: IssueLevel.easy },
+      member: makeMember({ id: "gen-3", tier: Tier.general, department: Department.pr }),
+      pullRequests,
+      activeClaims: 0,
+      easyClaimsCount: 3, // 3 Easy claims already used
+      committedClaimsCount: 3,
+    });
+
+    const result = await processClaimComment(db, makeComment(), ISSUE_CTX, { postReply });
+    expect(result.outcome).toBe("easy_limit");
+    expect(postedComments.some((c) => c.kind === "claim_easy_limit")).toBe(true);
   });
 });
