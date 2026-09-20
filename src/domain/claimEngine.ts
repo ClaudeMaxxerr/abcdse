@@ -19,6 +19,19 @@
 
 import { PrismaClient, ClaimStatus, IssueLevel, Tier } from "@prisma/client";
 import { config } from "../config.js";
+import {
+  ACTIVE_CLAIM_STATUSES,
+  LIFETIME_EASY_CLAIM_STATUSES,
+  COMMITTED_CLAIM_STATUSES,
+  OCCUPIED_SPOT_CLAIM_STATUSES,
+} from "./claimConstants.js";
+
+export {
+  ACTIVE_CLAIM_STATUSES,
+  LIFETIME_EASY_CLAIM_STATUSES,
+  COMMITTED_CLAIM_STATUSES,
+  OCCUPIED_SPOT_CLAIM_STATUSES,
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -221,7 +234,7 @@ export async function processClaimComment(
         const easyCount = await tx.claim.count({
           where: {
             memberId: member.id,
-            status: { in: [ClaimStatus.active, ClaimStatus.pr_raised, ClaimStatus.merged] },
+            status: { in: [...LIFETIME_EASY_CLAIM_STATUSES] },
             issue: { level: IssueLevel.easy },
           },
         });
@@ -238,7 +251,7 @@ export async function processClaimComment(
       const activeClaims = await tx.claim.count({
         where: {
           memberId: member.id,
-          status: ClaimStatus.active,
+          status: { in: [...ACTIVE_CLAIM_STATUSES] },
         },
       });
       if (activeClaims >= 2) {
@@ -269,7 +282,7 @@ export async function processClaimComment(
       const occupiedClaims = await tx.claim.findMany({
         where: {
           issueId: dbIssue.id,
-          status: { in: [ClaimStatus.active, ClaimStatus.pr_raised] },
+          status: { in: [...OCCUPIED_SPOT_CLAIM_STATUSES] },
         },
         include: { member: { select: { team: true, id: true } } },
       });
@@ -427,7 +440,7 @@ export async function processUnclaimComment(
       where: {
         memberId: member.id,
         issueId,
-        status: { in: [ClaimStatus.active] },
+        status: { in: [...ACTIVE_CLAIM_STATUSES] },
       },
     });
 

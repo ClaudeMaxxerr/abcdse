@@ -22,6 +22,7 @@ import { prisma } from "../db.js";
 import { Department, Team, Tier } from "@prisma/client";
 import { resolveSession } from "../auth/session.js";
 import { readSessionToken } from "../auth/requestHelpers.js";
+import { COMMITTED_CLAIM_STATUSES } from "../domain/claimConstants.js";
 
 export interface RegistrationRoutesOptions {
   prismaClient?: typeof prisma;
@@ -169,7 +170,7 @@ export const registrationRoutes: FastifyPluginAsync<RegistrationRoutesOptions> =
     const committedClaimsCount = await db.claim.count({
       where: {
         memberId: session.memberId,
-        status: { in: ["active", "pr_raised", "merged"] },
+        status: { in: [...COMMITTED_CLAIM_STATUSES] },
       },
     });
     const prsCount = await db.pullRequest.count({

@@ -1214,6 +1214,121 @@ describe("PATCH /api/dashboard/profile — self-correction rules", () => {
     const body = JSON.parse(res.body);
     expect(body.member.canEditProfile).toBe(false);
   });
+
+  it("GET /api/dashboard counts ONLY active claims (1 active + 1 pr_raised shows activeClaimsCount=1, freeActiveSlots=1)", async () => {
+    const activeClaimObj = {
+      id: "claim-active-1",
+      memberId,
+      issueId: "issue-1",
+      claimedAt: new Date("2026-09-20T10:00:00Z"),
+      deadline: new Date("2026-09-22T10:00:00Z"),
+      status: "active",
+      issue: {
+        id: "issue-1",
+        number: 19,
+        title: "Campus Flow",
+        level: "medium",
+        repo: { owner: "AARVAK-VSET", name: "campus-flow" },
+      },
+    };
+
+    db.claim.findMany.mockImplementation(async ({ where }: { where?: any }) => {
+      const statusList = where?.status?.in || [];
+      if (statusList.includes("active") && statusList.length === 1) {
+        // Only active claims queried for activeClaims
+        return [activeClaimObj];
+      }
+      if (statusList.includes("pr_raised")) {
+        // History claims
+        return [
+          {
+            id: "claim-pr-1",
+            memberId,
+            issueId: "issue-2",
+            claimedAt: new Date("2026-09-19T10:00:00Z"),
+            deadline: new Date("2026-09-21T10:00:00Z"),
+            status: "pr_raised",
+            issue: {
+              id: "issue-2",
+              number: 21,
+              title: "BOM Matrix",
+              level: "medium",
+              repo: { owner: "AARVAK-VSET", name: "bom-matrix" },
+            },
+          },
+        ];
+      }
+      return [];
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/dashboard",
+      headers: { cookie: sessionCookie },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.limits.activeClaimsCount).toBe(1);
+    expect(body.limits.freeActiveSlots).toBe(1);
+    expect(body.limits.maxActiveSlots).toBe(2);
+    expect(body.activeClaims).toHaveLength(1);
+    expect(body.activeClaims[0].id).toBe("claim-active-1");
+  });
+
+  it("GET /api/dashboard returns activeClaimsCount=2 and freeActiveSlots=0 when member holds 2 active claims (2/2)", async () => {
+    const claim1 = {
+      id: "claim-active-1",
+      memberId,
+      issueId: "issue-1",
+      claimedAt: new Date("2026-09-20T10:00:00Z"),
+      deadline: new Date("2026-09-22T10:00:00Z"),
+      status: "active",
+      issue: {
+        id: "issue-1",
+        number: 19,
+        title: "Campus Flow",
+        level: "medium",
+        repo: { owner: "AARVAK-VSET", name: "campus-flow" },
+      },
+    };
+    const claim2 = {
+      id: "claim-active-2",
+      memberId,
+      issueId: "issue-2",
+      claimedAt: new Date("2026-09-20T11:00:00Z"),
+      deadline: new Date("2026-09-22T11:00:00Z"),
+      status: "active",
+      issue: {
+        id: "issue-2",
+        number: 22,
+        title: "Campus Flow 22",
+        level: "medium",
+        repo: { owner: "AARVAK-VSET", name: "campus-flow" },
+      },
+    };
+
+    db.claim.findMany.mockImplementation(async ({ where }: { where?: any }) => {
+      const statusList = where?.status?.in || [];
+      if (statusList.includes("active") && statusList.length === 1) {
+        return [claim1, claim2];
+      }
+      return [];
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/dashboard",
+      headers: { cookie: sessionCookie },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.limits.activeClaimsCount).toBe(2);
+    expect(body.limits.freeActiveSlots).toBe(0);
+    expect(body.limits.maxActiveSlots).toBe(2);
+    expect(body.activeClaims).toHaveLength(2);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

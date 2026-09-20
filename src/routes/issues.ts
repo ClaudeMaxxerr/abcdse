@@ -9,6 +9,7 @@
 
 import { FastifyPluginAsync } from "fastify";
 import { prisma } from "../db.js";
+import { OCCUPIED_SPOT_CLAIM_STATUSES } from "../domain/claimConstants.js";
 
 export interface IssuesRoutesOptions {
   prismaClient?: typeof prisma;
@@ -42,7 +43,7 @@ export const issuesRoutes: FastifyPluginAsync<IssuesRoutesOptions> = async (app,
         },
         claims: {
           where: {
-            status: { in: ["active", "pr_raised"] },
+            status: { in: [...OCCUPIED_SPOT_CLAIM_STATUSES] },
           },
           include: {
             member: {

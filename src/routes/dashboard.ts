@@ -11,9 +11,14 @@ import { prisma } from "../db.js";
 import { resolveSession } from "../auth/session.js";
 import { readSessionToken } from "../auth/requestHelpers.js";
 import { getMemberScore } from "../domain/scoring.js";
-import { Department, Team } from "@prisma/client";
+import { Department, Team, ClaimStatus } from "@prisma/client";
 import { z } from "zod";
 import { deriveTier, detectForbiddenFields } from "./registration.js";
+import {
+  ACTIVE_CLAIM_STATUSES,
+  LIFETIME_EASY_CLAIM_STATUSES,
+  COMMITTED_CLAIM_STATUSES,
+} from "../domain/claimConstants.js";
 
 export interface DashboardRoutesOptions {
   prismaClient?: typeof prisma;
@@ -51,11 +56,11 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
     // 1. Scoring & PR breakdown
     const score = await getMemberScore(db, memberId);
 
-    // 2. Active & pr_raised claims
+    // 2. Active claims only (status = 'active') per § 2.4 — claims with PR raised ('pr_raised') have freed their slot
     const activeClaims = await db.claim.findMany({
       where: {
         memberId,
-        status: { in: ["active", "pr_raised"] },
+        status: { in: [...ACTIVE_CLAIM_STATUSES] },
       },
       include: {
         issue: {
@@ -72,11 +77,11 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
       orderBy: { claimedAt: "asc" },
     });
 
-    // 3. Past / completed claims (for history)
+    // 3. Past / completed / PR-raised claims (for history)
     const historyClaims = await db.claim.findMany({
       where: {
         memberId,
-        status: { in: ["merged", "expired", "released", "rejected"] },
+        status: { in: [ClaimStatus.pr_raised, ClaimStatus.merged, ClaimStatus.expired, ClaimStatus.released, ClaimStatus.rejected] },
       },
       include: {
         issue: {
@@ -100,17 +105,18 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
     const committedClaimsCount = await db.claim.count({
       where: {
         memberId,
-        status: { in: ["active", "pr_raised", "merged"] },
+        status: { in: [...COMMITTED_CLAIM_STATUSES] },
       },
     });
     const prsCount = await db.pullRequest.count({
       where: { memberId },
     });
 
-    // 5. Easy claim usage (lifetime count of accepted Easy claims)
+    // 5. Easy claim usage (lifetime count of accepted Easy claims: active, pr_raised, merged)
     const easyClaimsCount = await db.claim.count({
       where: {
         memberId,
+        status: { in: [...LIFETIME_EASY_CLAIM_STATUSES] },
         issue: {
           level: "easy",
         },
@@ -239,7 +245,7 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
     const committedClaimsCount = await db.claim.count({
       where: {
         memberId,
-        status: { in: ["active", "pr_raised", "merged"] },
+        status: { in: [...COMMITTED_CLAIM_STATUSES] },
       },
     });
     const prsCount = await db.pullRequest.count({ where: { memberId } });

@@ -325,11 +325,11 @@ describe("Test 2: general member 4th Easy claim is rejected", () => {
 // ---------------------------------------------------------------------------
 
 describe("Test 3: 2-active-claims limit", () => {
-  it("rejects when member already holds 2 active claims", async () => {
+  it("rejects when member already holds 2 active claims (shows 2/2 and rejected on third)", async () => {
     const { db, postedComments, postReply } = buildMockDb({
       issue: { id: "issue-m-1", spots: 2, level: IssueLevel.medium },
       member: makeMember({ tier: Tier.general }),
-      activeClaims: 2, // at limit
+      activeClaims: 2, // at limit (2 active claims)
     });
 
     const result = await processClaimComment(db, makeComment(), ISSUE_CTX, { postReply });
@@ -339,13 +339,13 @@ describe("Test 3: 2-active-claims limit", () => {
     expect(postedComments.some((c) => c.kind === "claim_active_limit")).toBe(true);
   });
 
-  it("succeeds when one active claim is now pr_raised (active count drops to 1)", async () => {
-    // When a PR is raised, status changes to pr_raised — no longer counts as active
+  it("succeeds when member has 1 active + 1 pr_raised claim (freed slot lets them claim a third issue)", async () => {
+    // When a PR is raised, status changes to pr_raised — only 1 active claim remains
     const { db, postReply } = buildMockDb({
       issue: { id: "issue-m-2", spots: 2, level: IssueLevel.medium },
       member: makeMember({ tier: Tier.general }),
-      activeClaims: 1, // PR was raised on the other, now only 1 active
-      occupiedClaims: [], // no occupied spots yet
+      activeClaims: 1, // 1 active + 1 pr_raised -> activeClaimsCount is 1
+      occupiedClaims: [], // no occupied spots yet on this issue
     });
 
     const result = await processClaimComment(db, makeComment(), ISSUE_CTX, { postReply });
