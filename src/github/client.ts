@@ -141,4 +141,40 @@ export class GitHubApiClient {
     );
     return result.data;
   }
+
+  /**
+   * Helper to list open pull requests for a repository.
+   */
+  public async listOpenPullRequests(
+    owner: string,
+    repo: string
+  ): Promise<
+    Array<{
+      id: number;
+      number: number;
+      title: string;
+      body: string | null;
+      created_at: string;
+      closed_at?: string | null;
+      merged_at?: string | null;
+      user: { id: number; login: string };
+    }>
+  > {
+    const result = await this.request<
+      Array<{
+        id: number;
+        number: number;
+        title: string;
+        body: string | null;
+        created_at: string;
+        closed_at?: string | null;
+        merged_at?: string | null;
+        user: { id: number; login: string };
+      }>
+    >(`/repos/${owner}/${repo}/pulls?state=open&per_page=100`, {
+      method: "GET",
+    });
+    return result.data || [];
+  }
 }
+

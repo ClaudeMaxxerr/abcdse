@@ -17,7 +17,8 @@ import { authRoutes } from "./routes/auth.js";
 import { registrationRoutes } from "./routes/registration.js";
 import { adminRoutes } from "./routes/admin.js";
 import { runOpportunisticSweep, runExpirySweep } from "./domain/expirySweep.js";
-import { postBotComment } from "./github/comments.js";
+import { runPrReconciliation } from "./domain/prReconciliation.js";
+import { postBotComment, postBotCommentOnPr } from "./github/comments.js";
 
 export interface BuildAppOptions extends WebhookHandlerOptions {
   disableLogging?: boolean;
@@ -311,11 +312,23 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       },
     });
 
+    const reconResult = await runPrReconciliation(db, {
+      postReply: async (issueId, kind, body, memberId) => {
+        await postBotComment(issueId, kind, body, memberId, { prismaClient: db });
+      },
+      postPrReply: async (owner, repo, prNumber, kind, body, memberId) => {
+        await postBotCommentOnPr(owner, repo, prNumber, kind, body, memberId, { prismaClient: db });
+      },
+    });
+
     return reply.status(200).send({
       statusCode: 200,
       ok: true,
       expired: result.expired,
       promoted: result.promoted,
+      recoveredPrs: reconResult.recoveredCount,
+      totalOpenPrs: reconResult.totalOpenPrs,
+      reconciledDetails: reconResult.reconciledPrs,
     });
   });
 

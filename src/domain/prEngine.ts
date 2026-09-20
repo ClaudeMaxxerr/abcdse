@@ -322,8 +322,9 @@ export async function processPullRequestOpened(
       });
     }
 
-    const msg = "This PR will not score — no valid active claim found. Per § 2.7: 'PR on an issue not validly claimed.'";
+    const msg = `This PR will not score — no valid active claim found for issue #${referencedIssue?.number ?? targetIssueId} by @${member.githubLogin}. Per § 2.7: 'PR on an issue not validly claimed.'`;
     await postReply(targetIssueId, "pr_unclaimed", msg, member.id);
+    await postPrReply(repoCtx.owner, repoCtx.name, prCtx.number, "pr_unclaimed", msg, member.id);
 
     return {
       outcome: "no_valid_claim",
@@ -333,10 +334,13 @@ export async function processPullRequestOpened(
     };
   }
 
+  const defaultMsg = `This PR will not score — no valid active claim found by @${member.githubLogin}. Per § 2.7: 'PR on an issue not validly claimed.'`;
+  await postPrReply(repoCtx.owner, repoCtx.name, prCtx.number, "pr_unclaimed", defaultMsg, member.id);
+
   return {
     outcome: "no_valid_claim",
     countsForScore: false,
-    message: "This PR will not score — no valid active claim found. Per § 2.7: 'PR on an issue not validly claimed.'",
+    message: defaultMsg,
   };
 }
 

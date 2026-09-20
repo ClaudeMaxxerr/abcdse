@@ -2,18 +2,21 @@ import { buildApp } from "./app.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { setupSweepInterval } from "./domain/expirySweep.js";
-import { postBotComment } from "./github/comments.js";
+import { setupReconciliationInterval } from "./domain/prReconciliation.js";
+import { postBotComment, postBotCommentOnPr } from "./github/comments.js";
 
 async function start(): Promise<void> {
   const app = await buildApp();
 
   // Graceful shutdown handlers
   let sweepTimer: ReturnType<typeof setInterval> | undefined;
+  let reconciliationTimer: ReturnType<typeof setInterval> | undefined;
 
   const shutdown = async (signal: string) => {
     app.log.info(`Received ${signal}. Shutting down gracefully...`);
     try {
       if (sweepTimer) clearInterval(sweepTimer);
+      if (reconciliationTimer) clearInterval(reconciliationTimer);
       await app.close();
       await prisma.$disconnect();
       app.log.info("Server and database connections closed.");
@@ -42,6 +45,17 @@ async function start(): Promise<void> {
       },
     });
     app.log.info("Expiry sweep interval started (every 5 minutes).");
+
+    // PR Reconciliation: every 10 minutes while the process is alive
+    reconciliationTimer = setupReconciliationInterval(prisma, {
+      postReply: async (issueId, kind, body, memberId) => {
+        await postBotComment(issueId, kind, body, memberId, { prismaClient: prisma });
+      },
+      postPrReply: async (owner, repo, prNumber, kind, body, memberId) => {
+        await postBotCommentOnPr(owner, repo, prNumber, kind, body, memberId, { prismaClient: prisma });
+      },
+    });
+    app.log.info("PR reconciliation interval started (every 10 minutes).");
   } catch (err) {
     app.log.error(err, "Failed to start server");
     process.exit(1);

@@ -1,4 +1,7 @@
-name: Keep tracker awake
+name: Tracker Keep-Alive & Sweep
+
+# NOTE: DISABLE THIS WORKFLOW AFTER THE EVENT TO PRESERVE RENDER'S 750-HOUR MONTHLY FREE TIER QUOTA.
+# Pinging every 10 minutes keeps the Render instance warm so GitHub webhooks (10s timeout) are never dropped.
 
 on:
   schedule:
@@ -9,5 +12,17 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping health endpoint
-        run: curl -sS -m 30 "${{ secrets.TRACKER_HEALTH_URL }}" || true
+      - name: Ping Tracker Health & Sweep
+        run: |
+          TRACKER_URL="${{ secrets.TRACKER_HEALTH_URL }}"
+          if [ -z "$TRACKER_URL" ]; then
+            TRACKER_URL="https://patch-wars-tracker.onrender.com"
+          fi
+          echo "Pinging health endpoint at ${TRACKER_URL}/health"
+          curl -sS -m 30 "${TRACKER_URL}/health" || true
+
+          if [ -n "${{ secrets.SWEEP_SECRET }}" ]; then
+            echo "Triggering sweep endpoint..."
+            curl -sS -m 30 -X POST "${TRACKER_URL}/internal/sweep" \
+              -H "Authorization: Bearer ${{ secrets.SWEEP_SECRET }}" || true
+          fi
