@@ -1,0 +1,13 @@
+name: Keep tracker awake
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: curl -sS -m 30 "${{ secrets.TRACKER_HEALTH_URL }}" || true
