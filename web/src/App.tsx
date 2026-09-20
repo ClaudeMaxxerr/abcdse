@@ -83,7 +83,7 @@ export function App() {
       }}>
         <div style={{ maxWidth: "1200px", margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
           <div>
-            <strong>Patch Wars 2026</strong> • The Society of Juniors (TSJ)
+            <strong>Patch Wars 2026</strong> • Tech Sprint Journey (TSJ)
           </div>
           <div>
             Official Open-Source Competition • All claim matching via GitHub OAuth
