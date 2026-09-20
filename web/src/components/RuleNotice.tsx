@@ -42,7 +42,7 @@ export const RuleNotice: React.FC<RuleNoticeProps> = ({ type, customText }) => {
         }}>
           <Info size={15} style={{ flexShrink: 0, marginTop: "2px", color: "#fb923c" }} />
           <div>
-            <strong>Hard Cap (2 Max):</strong> General tier participants may claim a lifetime maximum of 2 Hard issues. Medium issues remain open (3 Easy + 4 Medium reaches the 80-pt cap).
+            <strong>Hard Cap (3 Max):</strong> General tier participants may claim a lifetime maximum of 3 Hard issues. Medium issues remain open (3 Easy + 4 Medium reaches the 80-pt cap).
           </div>
         </div>
       );

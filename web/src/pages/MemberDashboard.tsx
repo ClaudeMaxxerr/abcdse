@@ -176,8 +176,8 @@ export const MemberDashboard: React.FC<{ user: UserAuth | null; initialData?: Da
             {!limits.isTech && (
               <div style={{ padding: "0.5rem 0.85rem", background: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}>
                 <div style={{ fontSize: "0.7rem", color: "#94a3b8", textTransform: "uppercase" }}>Hard Claimed</div>
-                <div style={{ fontSize: "1rem", fontWeight: 800, color: (limits.hardClaimsCount ?? 0) >= 2 ? "#f43f5e" : "#38bdf8", fontFamily: "var(--font-mono)" }}>
-                  {limits.hardClaimsCount ?? 0} / 2
+                <div style={{ fontSize: "1rem", fontWeight: 800, color: (limits.hardClaimsCount ?? 0) >= 3 ? "#f43f5e" : "#38bdf8", fontFamily: "var(--font-mono)" }}>
+                  {limits.hardClaimsCount ?? 0} / 3
                 </div>
               </div>
             )}

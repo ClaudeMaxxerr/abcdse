@@ -35,12 +35,15 @@ export const LIFETIME_EASY_CLAIM_STATUSES: readonly ClaimStatus[] = [
   ClaimStatus.merged,
 ] as const;
 
-/** Claims counting towards the lifetime limit of 2 Hard claims (General tier) */
+/** Claims counting towards the lifetime limit of 3 Hard claims (General tier) */
 export const LIFETIME_HARD_CLAIM_STATUSES: readonly ClaimStatus[] = [
   ClaimStatus.active,
   ClaimStatus.pr_raised,
   ClaimStatus.merged,
 ] as const;
+
+/** Maximum lifetime Hard claims allowed for General tier members */
+export const MAX_GENERAL_HARD_CLAIMS = 3;
 
 /** Claims representing committed work that lock department/team editing */
 export const COMMITTED_CLAIM_STATUSES: readonly ClaimStatus[] = [

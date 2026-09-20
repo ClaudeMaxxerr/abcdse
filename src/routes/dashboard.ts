@@ -18,6 +18,7 @@ import {
   ACTIVE_CLAIM_STATUSES,
   LIFETIME_EASY_CLAIM_STATUSES,
   LIFETIME_HARD_CLAIM_STATUSES,
+  MAX_GENERAL_HARD_CLAIMS,
   COMMITTED_CLAIM_STATUSES,
 } from "../domain/claimConstants.js";
 
@@ -173,8 +174,8 @@ export const dashboardRoutes: FastifyPluginAsync<DashboardRoutesOptions> = async
 
     const isTech = member.tier === "tech";
     const easyRemaining = isTech ? 0 : Math.max(0, 3 - easyClaimsCount);
-    const hardRemaining = isTech ? null : Math.max(0, 2 - hardClaimsCount);
-    const maxHardClaims = isTech ? null : 2;
+    const hardRemaining = isTech ? null : Math.max(0, MAX_GENERAL_HARD_CLAIMS - hardClaimsCount);
+    const maxHardClaims = isTech ? null : MAX_GENERAL_HARD_CLAIMS;
     const freeActiveSlots = Math.max(0, 2 - activeClaims.length);
     const capReached = score.raw >= score.tierCap;
     const canEditProfile = Boolean(committedClaimsCount === 0 && prsCount === 0);

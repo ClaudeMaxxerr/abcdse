@@ -837,14 +837,14 @@ describe("Mid-event rule: Tier cap potential claim-eligibility check", () => {
 // Mid-event rule: Hard issue limit for General tier (max 2 lifetime Hard claims)
 // ---------------------------------------------------------------------------
 
-describe("Mid-event rule: Hard issue limit for General tier (max 2 Hard claims)", () => {
-  it("allows a general member with 1 Hard claim to claim another Hard issue", async () => {
+describe("Mid-event rule: Hard issue limit for General tier (max 3 Hard claims)", () => {
+  it("allows a general member with 2 Hard claims to claim a third Hard issue", async () => {
     const { db, postReply } = buildMockDb({
       issue: { id: "issue-hard-10", spots: 2, level: IssueLevel.hard },
       member: makeMember({ id: "gen-1", tier: Tier.general, department: Department.pr }),
-      hardClaimsCount: 1, // 1 previous Hard claim < 2 limit
+      hardClaimsCount: 2, // 2 previous Hard claims < 3 limit
       activeClaims: 0,
-      committedClaimsCount: 1,
+      committedClaimsCount: 2,
     });
 
     const result = await processClaimComment(db, makeComment(), ISSUE_CTX, { postReply });
@@ -852,21 +852,21 @@ describe("Mid-event rule: Hard issue limit for General tier (max 2 Hard claims)"
     expect((result as { deadline: Date }).deadline).toBeInstanceOf(Date);
   });
 
-  it("rejects a general member with 2 Hard claims when claiming a 3rd Hard issue", async () => {
+  it("rejects a general member with 3 Hard claims when claiming a 4th Hard issue", async () => {
     const { db, postedComments, postReply } = buildMockDb({
       issue: { id: "issue-hard-11", spots: 2, level: IssueLevel.hard },
       member: makeMember({ id: "gen-2", tier: Tier.general, department: Department.pr }),
-      hardClaimsCount: 2, // already at 2 Hard claims limit
+      hardClaimsCount: 3, // already at 3 Hard claims limit
       activeClaims: 0,
-      committedClaimsCount: 2,
+      committedClaimsCount: 3,
     });
 
     const result = await processClaimComment(db, makeComment(), ISSUE_CTX, { postReply });
     expect(result.outcome).toBe("hard_limit");
     const msg = (result as { message: string }).message;
-    expect(msg).toContain("General members may claim at most 2 Hard issues. You already have 2. Medium issues are still open to you — 3 Easy plus 4 Medium reaches the 80-point cap.");
+    expect(msg).toContain("General members may claim at most 3 Hard issues. You already have 3. Medium issues are still open to you — 3 Easy plus 4 Medium reaches the 80-point cap.");
     expect(postedComments.some((c) => c.kind === "claim_hard_limit")).toBe(true);
-    expect(postedComments[0]!.body).toContain("General members may claim at most 2 Hard issues. You already have 2. Medium issues are still open to you — 3 Easy plus 4 Medium reaches the 80-point cap.");
+    expect(postedComments[0]!.body).toContain("General members may claim at most 3 Hard issues. You already have 3. Medium issues are still open to you — 3 Easy plus 4 Medium reaches the 80-point cap.");
   });
 
   it("does NOT reject a tech member with 4 Hard claims by this rule (unrestricted on Hard)", async () => {

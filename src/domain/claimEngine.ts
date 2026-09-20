@@ -23,6 +23,7 @@ import {
   ACTIVE_CLAIM_STATUSES,
   LIFETIME_EASY_CLAIM_STATUSES,
   LIFETIME_HARD_CLAIM_STATUSES,
+  MAX_GENERAL_HARD_CLAIMS,
   COMMITTED_CLAIM_STATUSES,
   OCCUPIED_SPOT_CLAIM_STATUSES,
 } from "./claimConstants.js";
@@ -36,6 +37,7 @@ export {
   ACTIVE_CLAIM_STATUSES,
   LIFETIME_EASY_CLAIM_STATUSES,
   LIFETIME_HARD_CLAIM_STATUSES,
+  MAX_GENERAL_HARD_CLAIMS,
   COMMITTED_CLAIM_STATUSES,
   OCCUPIED_SPOT_CLAIM_STATUSES,
 };
@@ -258,7 +260,7 @@ export async function processClaimComment(
         }
       }
 
-      // ── Step 4b: Hard limit for General tier (general: max 2, tech: unrestricted) ──
+      // ── Step 4b: Hard limit for General tier (general: max 3, tech: unrestricted) ──
       if (member.tier === Tier.general && level === IssueLevel.hard) {
         const hardCount = await tx.claim.count({
           where: {
@@ -267,10 +269,10 @@ export async function processClaimComment(
             issue: { level: IssueLevel.hard },
           },
         });
-        if (hardCount >= 2) {
+        if (hardCount >= MAX_GENERAL_HARD_CLAIMS) {
           const msg =
             `❌ **Hard issue limit reached.** ` +
-            `General members may claim at most 2 Hard issues. You already have 2. ` +
+            `General members may claim at most 3 Hard issues. You already have 3. ` +
             `Medium issues are still open to you — 3 Easy plus 4 Medium reaches the 80-point cap.`;
           return { outcome: "hard_limit", message: msg, issueDbId: dbIssue.id, memberId: member.id };
         }
