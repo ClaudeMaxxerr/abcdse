@@ -349,12 +349,8 @@ export function computeTeamBonuses(
       ? secondCandidate
       : null;
 
-  // Most participation: non-winner teams with at least 1 PR raised (totalPrs > 0)
-  const nonWinners = winnerTeam
-    ? rankedForChallenge.filter((t) => t.team !== winnerTeam.team)
-    : [];
-
-  const rankedForParticipation = [...nonWinners]
+  // Most participation: team whose members raised the most PRs total (totalPrs > 0)
+  const rankedForParticipation = [...rawTeams]
     .filter((t) => t.totalPrs > 0)
     .sort((a, b) => {
       if (b.totalPrs !== a.totalPrs) return b.totalPrs - a.totalPrs;
